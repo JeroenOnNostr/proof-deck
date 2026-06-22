@@ -91,14 +91,28 @@
     -webkit-text-fill-color:var(--orange);color:var(--orange);
     text-shadow:0 0 26px rgba(247,147,26,.45);
   }
-  .tagline{color:var(--muted);font-size:15px;max-width:62ch;margin:10px 0 2px}
+  .tagline{color:var(--ink);font-size:16px;max-width:62ch;margin:10px 0 2px}
   .tagline b{color:var(--purple-200);font-weight:600}
   .tagline .o{color:var(--orange-bright);font-weight:600}
-  .epigraph{
-    margin:16px 0 6px;border-left:2px solid var(--orange);
-    padding:6px 0 6px 14px;color:var(--muted);font-style:italic;font-size:14px;max-width:70ch
+  /* compact 'what each card does' strip */
+  .howstrip{
+    list-style:none;margin:16px 0 4px;padding:0;
+    display:flex;flex-wrap:wrap;gap:8px;counter-reset:step;
   }
-  .epigraph cite{display:block;font-style:normal;color:var(--muted-2);font-size:12.5px;margin-top:3px}
+  .howstrip li{
+    display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;
+    background:rgba(42,17,64,.45);border:1px solid var(--line);border-radius:12px;
+    padding:8px 12px;font-size:12px;color:var(--muted)
+  }
+  .howstrip .hi{font-size:15px;line-height:1;flex:0 0 auto;color:var(--orange-bright)}
+  .howstrip b{color:var(--ink);font-weight:700;flex:0 0 auto}
+  .howstrip .hs{color:var(--muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media (max-width:760px){ .howstrip .hs{display:none} .howstrip li{flex:0 0 auto} }
+  .epigraph{
+    margin:14px 0 4px;border-left:2px solid var(--orange);
+    padding:4px 0 4px 14px;color:var(--muted-2);font-style:italic;font-size:13px;max-width:70ch
+  }
+  .epigraph cite{display:block;font-style:normal;color:var(--muted-2);font-size:12px;margin-top:2px;opacity:.8}
 
   /* ---------- controls / toolbar ---------- */
   .toolbar{
@@ -415,9 +429,15 @@
       <div class="logo">The Proof Deck <span class="num">21</span></div>
     </div>
     <p class="tagline">
-      A <b>Nostr</b> reader that deals 21 long-form articles as cards — and re-runs each one's
-      <span class="o">cryptographic proof</span> in your browser. Don't trust the host. Verify the bytes.
+      21 signed <b>Nostr</b> articles. Flip any card to <span class="o">verify the bytes yourself</span> — in your browser, not on trust.
     </p>
+    <ol class="howstrip" aria-label="What each card does">
+      <li><span class="hi">📥</span><b>Fetch</b><span class="hs">21 long-form articles (kind&nbsp;30023)</span></li>
+      <li><span class="hi">✓</span><b>Verify</b><span class="hs">re-run the signature + recompute the id, locally</span></li>
+      <li><span class="hi">⛓</span><b>Witness</b><span class="hs">confirm relays serve identical bytes</span></li>
+      <li><span class="hi">↯</span><b>Tamper</b><span class="hs">change a byte, watch the proof break</span></li>
+      <li><span class="hi">⤓</span><b>Capsule</b><span class="hs">mint an offline-re-verifiable proof</span></li>
+    </ol>
     <blockquote class="epigraph">
       “It should not matter where information is published.”
       <cite>— Gigi, <em>Purple Text, Orange Highlights</em></cite>
@@ -450,7 +470,7 @@
   </div>
 
   <div class="deckmeta">
-    <h2><b id="shownCount">0</b> <span id="shownLabel">articles</span> · each card flips to its proof</h2>
+    <h2><b id="shownCount">0</b> <span id="shownLabel">articles</span> · tap a card to flip it</h2>
     <span class="pill" title="Articles whose signature re-verified in your browser">
       <span class="dot live"></span><b id="verifiedCount">0</b>&nbsp;verified&nbsp;✓
     </span>
@@ -460,12 +480,9 @@
 
   <footer class="site">
     <p>
-      <b style="color:var(--purple-200)">The Proof Deck</b> — built for the SEC-08 exercise.
-      Fetches kind:30023 (NIP-23) over Nostr, re-verifies Schnorr signatures with
-      <a href="https://github.com/nbd-wtf/nostr-tools" target="_blank" rel="noopener">nostr-tools</a>
-      client-side, recomputes each event id from canonical serialization, witnesses copies across relays,
-      and mints offline-re-verifiable proof capsules. One HTML file, no build —
-      <a href="#" id="viewSource">view source</a>.
+      <b style="color:var(--purple-200)">The Proof Deck</b> · kind:30023 over Nostr, verified client-side with
+      <a href="https://github.com/nbd-wtf/nostr-tools" target="_blank" rel="noopener">nostr-tools</a>.
+      One HTML file, no build — <a href="#" id="viewSource">view source</a>.
     </p>
   </footer>
 </div>
@@ -488,10 +505,7 @@
       </div>
       <div class="panel" id="panelTamper">
         <p class="sand-intro">
-          Nostr's guarantee is silent: clients verify signatures and quietly drop the bad ones, so you
-          never see it work. <b>Break it yourself.</b> Edit one character below and watch the proof snap red —
-          the recomputed event id stops matching, and the Schnorr signature no longer holds. This is what
-          a malicious or buggy relay can never get past.
+          <b>Break it yourself.</b> Edit one character and watch the recomputed id and signature fail — what no relay can fake.
         </p>
         <div class="sand-grid">
           <div class="verdict pending sand-verdict" id="sandVerdict">
