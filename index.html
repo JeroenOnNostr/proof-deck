@@ -20,7 +20,14 @@
 
   "IT SHOULD NOT MATTER WHERE INFORMATION IS PUBLISHED." — Gigi, Purple Text, Orange Highlights
 -->
-<script src="https://unpkg.com/[email protected]/lib/nostr.bundle.js"></script>
+<!-- nostr-tools, pinned. Try unpkg; if it hiccups, fall back to jsdelivr so a cold
+     open never fails on a single CDN. The bundle exposes window.NostrTools. -->
+<script src="https://unpkg.com/nostr-tools@2.23.7/lib/nostr.bundle.js"></script>
+<script>
+  if (!window.NostrTools) {
+    document.write('<script src="https://cdn.jsdelivr.net/npm/nostr-tools@2.23.7/lib/nostr.bundle.js"><\/script>');
+  }
+</script>
 <style>
   :root{
     /* purple = Nostr / identity layer ; orange = Bitcoin / proof layer */
@@ -979,7 +986,8 @@
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Proof capsule — ${escapeHtml(meta.title)}</title>
-<script src="https://unpkg.com/[email protected]/lib/nostr.bundle.js"><\/script>
+<script src="https://unpkg.com/nostr-tools@2.23.7/lib/nostr.bundle.js"><\/script>
+<script>if(!window.NostrTools){document.write('<script src="https://cdn.jsdelivr.net/npm/nostr-tools@2.23.7/lib/nostr.bundle.js"><\\/script>');}<\/script>
 <style>
 body{font-family:system-ui,sans-serif;background:#16071f;color:#f3ecfb;margin:0;padding:32px;line-height:1.6}
 .wrap{max-width:760px;margin:0 auto}
