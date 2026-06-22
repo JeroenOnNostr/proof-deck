@@ -15,7 +15,8 @@ Schnorr signature check, right there — *bytes intact, signed by this key, unta
 ## What it does
 
 - Fetches 21 `kind:30023` articles across several relays. Hashtag checkboxes (from `t` tags) with
-  counts, and an **ANY / ALL** filter toggle. Each card shows title, author name + picture, and date.
+  counts and an **ANY / ALL** toggle; selecting tags re-queries relays for up to 21 articles that
+  actually carry them. Each card shows title, author name + picture, and date.
 - **Re-verifies every article** client-side (id recompute + Schnorr), with a one-tap inspector
   showing pubkey, claimed id, and computed id side by side.
 - **Tamper sandbox** — edit one character of the signed text and watch the proof snap red, with a

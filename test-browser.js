@@ -59,22 +59,29 @@ const FILE_URL = "file://" + path.resolve("index.html");
   ok((await page.locator("#verifiedCount").textContent()) === "21", "verified counter = 21");
   ok((await page.locator("#shownCount").textContent()) === "21", "shown count = 21");
 
-  // filter: click #bitcoin
+  // filter: click #bitcoin (fixture mode → fetchForTags filters the bundled sample;
+  // 350ms debounce, so wait for the deck to settle)
   const btcChip = page.locator('.tagchip[data-tag="bitcoin"]');
   const btcCount = parseInt(await btcChip.locator(".cnt").textContent(), 10);
   await btcChip.click();
+  await page.waitForTimeout(700);
   const afterBtc = parseInt(await page.locator("#shownCount").textContent(), 10);
   ok(afterBtc === btcCount, "filter #bitcoin shows " + btcCount + " (got " + afterBtc + ")");
   // add #nostr (ANY) then ALL
   await page.locator('.tagchip[data-tag="nostr"]').click();
+  await page.waitForTimeout(700);
   const anyShown = parseInt(await page.locator("#shownCount").textContent(), 10);
   ok(anyShown >= afterBtc, "ANY union >= single (" + anyShown + ">=" + afterBtc + ")");
   await page.locator("#modeAnd").click();
+  await page.waitForTimeout(200);
   const allShown = parseInt(await page.locator("#shownCount").textContent(), 10);
   ok(allShown <= anyShown, "ALL intersection <= ANY (" + allShown + "<=" + anyShown + ")");
+  // the tag cloud must NOT collapse — base tags stay discoverable after a tag fetch
+  ok(await page.locator('.tagchip[data-tag="philosophy"]').count() > 0, "non-selected base tags stay in the cloud (no stranding)");
   await page.locator("#clearTags").click();
   await page.locator("#modeOr").click();
-  ok((await page.locator("#shownCount").textContent()) === "21", "clear restores 21");
+  await page.waitForTimeout(200);
+  ok((await page.locator("#shownCount").textContent()) === "21", "clear restores base deck (21)");
 
   // verified status pill shows on the front face before flipping
   const card0 = page.locator(".card:not(.skeleton)").first();

@@ -94,20 +94,9 @@
   .tagline{color:var(--ink);font-size:16px;max-width:62ch;margin:10px 0 2px}
   .tagline b{color:var(--purple-200);font-weight:600}
   .tagline .o{color:var(--orange-bright);font-weight:600}
-  /* compact 'what each card does' strip */
-  .howstrip{
-    list-style:none;margin:16px 0 4px;padding:0;
-    display:flex;flex-wrap:wrap;gap:8px;counter-reset:step;
-  }
-  .howstrip li{
-    display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;
-    background:rgba(42,17,64,.45);border:1px solid var(--line);border-radius:12px;
-    padding:8px 12px;font-size:12px;color:var(--muted)
-  }
-  .howstrip .hi{font-size:15px;line-height:1;flex:0 0 auto;color:var(--orange-bright)}
-  .howstrip b{color:var(--ink);font-weight:700;flex:0 0 auto}
-  .howstrip .hs{color:var(--muted-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  @media (max-width:760px){ .howstrip .hs{display:none} .howstrip li{flex:0 0 auto} }
+  /* plain-prose explanation under the tagline */
+  .howline{color:var(--muted);font-size:14px;line-height:1.65;max-width:66ch;margin:14px 0 4px}
+  .howline b{color:var(--ink);font-weight:600}
   .epigraph{
     margin:14px 0 4px;border-left:2px solid var(--orange);
     padding:4px 0 4px 14px;color:var(--muted-2);font-style:italic;font-size:13px;max-width:70ch
@@ -431,13 +420,13 @@
     <p class="tagline">
       21 signed <b>Nostr</b> articles. Flip any card to <span class="o">verify the bytes yourself</span> — in your browser, not on trust.
     </p>
-    <ol class="howstrip" aria-label="What each card does">
-      <li><span class="hi">📥</span><b>Fetch</b><span class="hs">21 long-form articles (kind&nbsp;30023)</span></li>
-      <li><span class="hi">✓</span><b>Verify</b><span class="hs">re-run the signature + recompute the id, locally</span></li>
-      <li><span class="hi">⛓</span><b>Witness</b><span class="hs">confirm relays serve identical bytes</span></li>
-      <li><span class="hi">↯</span><b>Tamper</b><span class="hs">change a byte, watch the proof break</span></li>
-      <li><span class="hi">⤓</span><b>Capsule</b><span class="hs">mint an offline-re-verifiable proof</span></li>
-    </ol>
+    <p class="howline">
+      Most clients check a signature once and quietly throw away whatever fails — you never see it happen.
+      This one does it out loud. Flip a card and it <b>re-derives the event id from the raw bytes and
+      re-checks the signature, in your browser</b>. From there you can pull the same article off several
+      relays to confirm they hand back identical bytes, change a character to watch the proof go red, or
+      save a small capsule that still verifies later with nothing connected.
+    </p>
     <blockquote class="epigraph">
       “It should not matter where information is published.”
       <cite>— Gigi, <em>Purple Text, Orange Highlights</em></cite>
@@ -584,7 +573,12 @@
     mode: "or",              // "or" | "and"
     showAllTags: false,      // expand the count-1 long tail
     verifiedTotal: 0,
+    baseDeck: [],            // saved default newest-21 — deselect-all restores this w/o a fetch
+    baseTags: [],            // tag universe from the base deck, so the cloud never strands discovery
+    usingFixture: false,     // we're offline on the bundled sample → tag selection filters it client-side
+    tagReqId: 0,             // monotonic token to discard stale tag-fetch responses
   };
+  let tagDebounce = null;
 
   let pool = null;
   try { pool = new NT.SimplePool(); } catch (e) { /* surfaced below */ }
@@ -736,6 +730,81 @@
     return true;
   }
 
+  // Build a standalone deck from a set of events with an ISOLATED dedupe map —
+  // never touches the global state.byKey (so a tag fetch can't leak into / be
+  // poisoned by the base deck). Newest per (kind,pubkey,d), sorted newest-first.
+  function buildDeck(events) {
+    const byKey = new Map();
+    for (const ev of events) {
+      try {
+        if (!ev || ev.kind !== 30023 || typeof ev.content !== "string" || !ev.content) continue;
+        const ttags = [...new Set(tagValues(ev, "t").map((t) => t.toLowerCase().trim()).filter(Boolean))];
+        if (!ttags.length) continue;
+        const key = articleKey(ev);
+        const ex = byKey.get(key);
+        if (ex && ex.event.created_at >= ev.created_at) continue;
+        byKey.set(key, {
+          event: ev, key,
+          title: tagValue(ev, "title") || dTag(ev) || "Untitled",
+          summary: tagValue(ev, "summary") || "",
+          image: tagValue(ev, "image") || "",
+          ts: articleTimestamp(ev), ttags, proof: null,
+        });
+      } catch (e) { /* skip a malformed event */ }
+    }
+    return [...byKey.values()].sort((a, b) => b.ts - a.ts);
+  }
+
+  // Deselecting all tags (or Clear tags) returns to the default newest-21 deck
+  // instantly, and invalidates any in-flight tag fetch so it can't clobber it.
+  function restoreBase() {
+    clearTimeout(tagDebounce);
+    state.tagReqId++;                 // invalidate in-flight fetchForTags
+    banner("");
+    state.articles = state.baseDeck.slice();
+    renderTags(); render();
+    setStatus((state.usingFixture ? "Sample · " : "Live · ") + state.articles.length + " articles · " + state.verifiedTotal + " verified", state.usingFixture ? "warn" : "live");
+  }
+
+  // Re-fetch up to ~21 articles that actually carry the selected tags, instead of
+  // shrinking the loaded set. One NIP-01 filter with a "#t" OR-array (relays only
+  // OR); ALL/AND is narrowed client-side in visibleArticles(). Guards stale races.
+  async function fetchForTags() {
+    const sel = [...state.selectedTags].map((t) => t.toLowerCase().trim()).filter(Boolean);
+    if (!sel.length) { restoreBase(); return; }
+    const myReq = ++state.tagReqId;
+    setStatus("Fetching #" + sel.join(", #") + " from " + RELAYS.length + " relays…", "warn");
+
+    let deck = [];
+    if (!state.usingFixture && pool) {
+      const evs = await queryRelaysOnce(RELAYS, { kinds: [30023], "#t": sel, limit: FETCH_LIMIT }, FETCH_TIMEOUT);
+      if (myReq !== state.tagReqId) return;          // a newer selection superseded us
+      deck = buildDeck(evs);
+    }
+
+    // Thin live result (or we're already offline) → filter the bundled sample so a
+    // cold reviewer still sees a non-empty, tag-relevant, fully-signed deck.
+    const thin = deck.length < 3;
+    if (thin) {
+      for (const pk in FIXTURE_PROFILES) state.profiles.set(pk, FIXTURE_PROFILES[pk]);
+      deck = buildDeck(FIXTURE);
+      banner("📡 Relays returned little for #" + sel.join(", #") + " right now — filtering the bundled sample instead.");
+    } else {
+      banner("");
+    }
+    if (myReq !== state.tagReqId) return;
+
+    // Keep a working set with headroom for ALL/AND narrowing, but don't verify
+    // hundreds of events we'll never show. visibleArticles() caps display to 21.
+    state.articles = deck.slice(0, DECK_SIZE * 3);
+    renderTags(); render();
+    await loadProfiles([...new Set(visibleArticles().map((a) => a.event.pubkey))]);
+    if (myReq !== state.tagReqId) return;            // user toggled during profile load
+    verifyAll(); render();
+    const vis = visibleArticles().length;
+    setStatus((thin ? "Sample · " : "Live · ") + vis + " matching · " + visibleVerified() + " verified", thin ? "warn" : "live");
+  }
+
   async function loadProfiles(pubkeys) {
     const need = pubkeys.filter((pk) => !state.profiles.has(pk));
     if (!need.length) return;
@@ -798,6 +867,12 @@
       return;
     }
 
+    // snapshot the default deck so deselecting all tags restores it instantly (no fetch),
+    // and remember its tag universe so the cloud never collapses after a tag-specific fetch.
+    state.usingFixture = usingFixture;
+    state.baseDeck = state.articles.slice();
+    state.baseTags = [...new Set(state.articles.flatMap((a) => a.ttags))];
+
     setStatus(state.articles.length + " articles · verifying signatures…", "warn");
     renderTags();                // hashtag checkboxes with counts + AND/OR toggle
     render();                    // show cards immediately (proof pending)
@@ -808,19 +883,25 @@
   }
 
   function verifyAll() {
-    state.verifiedTotal = 0;
-    for (const a of state.articles) {
-      a.proof = proveEvent(a.event);
-      if (a.proof.ok) state.verifiedTotal++;
-    }
+    for (const a of state.articles) if (!a.proof) a.proof = proveEvent(a.event);
+    // The header counter reflects the cards actually on screen, not the working set.
+    state.verifiedTotal = visibleVerified();
     $("#verifiedCount").textContent = state.verifiedTotal;
+  }
+  function visibleVerified() {
+    return visibleArticles().filter((a) => a.proof && a.proof.ok).length;
   }
 
   // =====================================================================
   //  TAG FILTER
   // =====================================================================
   function tagCounts() {
+    // The chip universe = base-deck tags ∪ selected tags ∪ current-deck tags, so a
+    // tag-specific re-fetch never collapses the cloud (discovery stays possible) and
+    // a selected tag is always present. Counts reflect what's on screen now.
     const m = new Map();
+    for (const t of state.baseTags) m.set(t, 0);
+    for (const t of state.selectedTags) if (!m.has(t)) m.set(t, 0);
     for (const a of state.articles) for (const t of a.ttags) m.set(t, (m.get(t) || 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }
@@ -859,7 +940,11 @@
   }
   function toggleTag(t) {
     if (state.selectedTags.has(t)) state.selectedTags.delete(t); else state.selectedTags.add(t);
-    renderTags(); render();
+    renderTags();                                    // instant checkbox feedback (active filters too)
+    state.tagReqId++;                                 // invalidate any in-flight fetch (selection changed)
+    if (!state.selectedTags.size) { restoreBase(); return; }
+    clearTimeout(tagDebounce);                        // debounce rapid toggles into one relay query
+    tagDebounce = setTimeout(fetchForTags, 350);
   }
   // The compact bar shown when the tag grid is collapsed: active filters as
   // removable chips, so you always see what's filtering while scrolling.
@@ -873,12 +958,15 @@
     $$(".afchip", host).forEach((el) => el.addEventListener("click", () => toggleTag(el.dataset.tag)));
   }
   function visibleArticles() {
-    if (!state.selectedTags.size) return state.articles;
+    if (!state.selectedTags.size) return state.articles.slice(0, DECK_SIZE);
     const sel = [...state.selectedTags];
-    return state.articles.filter((a) => {
+    // state.articles is now the tag-fetched set; ALL/AND narrows client-side, ANY/OR
+    // keeps the defensive some() filter (covers the fixture-fallback path). Cap at 21.
+    const out = state.articles.filter((a) => {
       const has = (t) => a.ttags.includes(t);
       return state.mode === "and" ? sel.every(has) : sel.some(has);
     });
+    return out.slice(0, DECK_SIZE);
   }
 
   // =====================================================================
@@ -1004,7 +1092,17 @@
     $("#shownCount").textContent = vis.length;
     $("#shownLabel").textContent = vis.length === 1 ? "article" : "articles";
     if (!vis.length) {
-      deck.innerHTML = `<div class="empty"><b>No cards match those tags.</b><br>Try ANY mode, or clear the selection.</div>`;
+      const sel = [...state.selectedTags];
+      let msg;
+      if (sel.length && state.mode === "and" && state.articles.length) {
+        // healthy result, but no single article carries ALL the tags — honest, not a "nothing found"
+        msg = `<b>No article carries all of ${sel.map((t) => "#" + escapeHtml(t)).join(" ")}.</b><br>Try <b>ANY</b> mode, or drop a tag.`;
+      } else if (sel.length) {
+        msg = `<b>Nothing came back for ${sel.map((t) => "#" + escapeHtml(t)).join(" ")}.</b><br>Try a different tag, or clear the selection.`;
+      } else {
+        msg = `<b>No articles to show.</b><br>Try reloading.`;
+      }
+      deck.innerHTML = `<div class="empty">${msg}</div>`;
       return;
     }
     deck.innerHTML = vis.map((a) => cardHtml(a, state.articles.indexOf(a))).join("");
@@ -1400,7 +1498,7 @@ Trust the math, not where you got this file.</p>
   function wireUI() {
     $("#modeOr").addEventListener("click", () => { state.mode = "or"; $("#modeOr").setAttribute("aria-pressed", "true"); $("#modeAnd").setAttribute("aria-pressed", "false"); render(); });
     $("#modeAnd").addEventListener("click", () => { state.mode = "and"; $("#modeAnd").setAttribute("aria-pressed", "true"); $("#modeOr").setAttribute("aria-pressed", "false"); render(); });
-    $("#clearTags").addEventListener("click", () => { state.selectedTags.clear(); renderTags(); render(); });
+    $("#clearTags").addEventListener("click", () => { state.selectedTags.clear(); renderTags(); restoreBase(); });
     $("#naddrGo").addEventListener("click", addFromInput);
     $("#naddrInput").addEventListener("keydown", (e) => { if (e.key === "Enter") addFromInput(); });
 
