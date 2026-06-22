@@ -15,3 +15,7 @@ verify-copy.js
 test-tagfetch.js
 verify-final.js
 shot-final.png
+verify-authors.js
+shot-authors.png
+probe-profiles.js
+probe2.js

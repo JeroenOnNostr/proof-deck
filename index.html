@@ -418,7 +418,7 @@
       <div class="logo">The Proof Deck <span class="num">21</span></div>
     </div>
     <p class="tagline">
-      21 signed <b>Nostr</b> articles. Flip any card to <span class="o">verify the bytes yourself</span> — in your browser, not on trust.
+      21 signed <b>Nostr</b> articles. Flip any card to <span class="o">verify the bytes yourself</span>, in your browser, not on trust.
     </p>
     <p class="howline">
       Most clients check a signature once and quietly throw away whatever fails, so you never see it happen.
@@ -563,6 +563,17 @@
   const FETCH_TIMEOUT = 6500;
   const WITNESS_RELAYS = RELAYS.slice(0, 5);
   const WITNESS_TIMEOUT = 4500;
+  // Profile (kind:0) metadata often lives elsewhere than the article relays
+  // (outbox model). purplepag.es / kindpag.es are profile-aggregation relays.
+  const PROFILE_RELAYS = [
+    "wss://purplepag.es",
+    "wss://relay.nostr.band",
+    "wss://relay.damus.io",
+    "wss://relay.primal.net",
+    "wss://nos.lol",
+    "wss://user.kindpag.es",
+    "wss://nostr.wine",
+  ];
 
   // ---- state -----------------------------------------------------------
   const state = {
@@ -808,7 +819,7 @@
   async function loadProfiles(pubkeys) {
     const need = pubkeys.filter((pk) => !state.profiles.has(pk));
     if (!need.length) return;
-    const metas = await queryRelaysOnce(RELAYS, { kinds: [0], authors: need, limit: need.length * 2 }, 5000);
+    const metas = await queryRelaysOnce(PROFILE_RELAYS, { kinds: [0], authors: need, limit: need.length * 3 }, 6000);
     const newest = new Map();
     for (const m of metas) {
       const cur = newest.get(m.pubkey);
@@ -989,13 +1000,27 @@
     }
   }
 
+  // Deterministic identicon for authors with no picture: a 2-stop gradient + monogram
+  // derived from the pubkey, so a profile-less author reads as an identity, not a glitch.
+  function identicon(pubkey, initial) {
+    let h = 0;
+    for (let i = 0; i < pubkey.length; i++) h = (h * 31 + pubkey.charCodeAt(i)) >>> 0;
+    const a = h % 360, b = (a + 40 + (h >> 8) % 80) % 360;
+    const style = `background:linear-gradient(135deg,hsl(${a} 55% 42%),hsl(${b} 60% 32%))`;
+    return `<div class="avatar ph" style="${style}">${escapeHtml(initial)}</div>`;
+  }
   function avatarHtml(profile, pubkey) {
     const initial = (profile.name || npubOf(pubkey).slice(4, 5) || "n").charAt(0).toUpperCase();
     if (profile.picture) {
       return `<img class="avatar" src="${escapeHtml(profile.picture)}" alt="" loading="lazy"
-        onerror="this.outerHTML='<div class=&quot;avatar ph&quot;>${escapeHtml(initial)}</div>'">`;
+        onerror="this.outerHTML='${identicon(pubkey, initial).replace(/'/g, "&#39;").replace(/"/g, "&quot;")}'">`;
     }
-    return `<div class="avatar ph">${escapeHtml(initial)}</div>`;
+    return identicon(pubkey, initial);
+  }
+  // A readable handle for an author with no kind:0 name: a short npub, clearly an npub.
+  function fallbackName(pubkey) {
+    const np = npubOf(pubkey);
+    return np.startsWith("npub1") ? np.slice(0, 10) + "…" + np.slice(-4) : shortHex(pubkey, 6);
   }
 
   function vglyph(proof) {
@@ -1007,7 +1032,7 @@
 
   function cardHtml(a, idx) {
     const p = state.profiles.get(a.event.pubkey) || { name: "", picture: "" };
-    const name = p.name || shortHex(npubOf(a.event.pubkey).slice(4), 6);
+    const name = p.name || fallbackName(a.event.pubkey);
     const ftags = a.ttags.slice(0, 4).map((t) => `<span class="ftag">#${escapeHtml(t)}</span>`).join("");
     return `
     <div class="card" data-idx="${idx}" data-flipped="0">
@@ -1330,7 +1355,7 @@ Trust the math, not where you got this file.</p>
     $("#modalTitle").textContent = a.title;
     $("#readByline").innerHTML =
       avatarHtml(p, a.event.pubkey) +
-      `<div><div class="name" style="font-weight:600">${escapeHtml(p.name || shortHex(npubOf(a.event.pubkey).slice(4), 6))}</div>
+      `<div><div class="name" style="font-weight:600">${escapeHtml(p.name || fallbackName(a.event.pubkey))}</div>
        <div class="when" style="color:var(--muted-2);font-size:12px">${escapeHtml(fmtDate(a.ts))}${a.proof ? (a.proof.ok ? ' · <span style="color:var(--ok)">✓ verified</span>' : ' · <span style="color:var(--bad)">✗ unverified</span>') : ""}</div></div>`;
     $("#readBody").innerHTML = safeMarkdown(a.event.content || "_No content._");
 
