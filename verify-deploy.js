@@ -19,7 +19,7 @@ const URL="https://jeroenonnostr.github.io/proof-deck/";
   console.log("cards:",cards," tags:",tags," verified:",verified," status:",status);
   // flip + check proof on the deployed site
   const c=page.locator(".card:not(.skeleton)").first();
-  await c.locator('[data-act="flip"]').click(); await page.waitForTimeout(400);
+  await c.locator(".front").click(); await page.waitForTimeout(400);
   const proofOk=await c.locator(".back .verdict.ok").count();
   console.log("proof verdict OK on deployed site:", proofOk>0);
   const pass = code===200 && cards===21 && tags>3 && proofOk>0;

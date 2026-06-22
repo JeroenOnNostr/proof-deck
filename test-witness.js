@@ -16,9 +16,9 @@ const bundle = fs.readFileSync(path.resolve("node_modules/nostr-tools/lib/nostr.
 
   // flip a card and run witness explicitly
   const card0 = page.locator(".card:not(.skeleton)").first();
-  await card0.locator('[data-act="flip"]').click();
+  await card0.locator(".front").click();
   await page.waitForTimeout(300);
-  await card0.locator('[data-act="witness"]').click();
+  await card0.locator(".back [data-act=\"witness\"]").click();
   // wait for witness text to settle (it starts as "querying", ends with a result)
   await page.waitForFunction(()=>{
     const el=document.querySelector('.card .back [data-witness] .wtext');

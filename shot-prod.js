@@ -9,7 +9,7 @@ const CHROME=["/home/jeroen/.cache/ms-playwright/chromium-1200/chrome-linux64/ch
   await page.waitForTimeout(1500);
   // flip the 2nd card (Purple and Orange themed one if present) for a nice proof shot
   const c=page.locator(".card:not(.skeleton)").nth(0);
-  await c.locator('[data-act="flip"]').click(); await page.waitForTimeout(700);
+  await c.locator(".front").click(); await page.waitForTimeout(700);
   await page.screenshot({path:"screenshot-production.png"});
   console.log("captured production screenshot");
   await browser.close();

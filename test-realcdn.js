@@ -21,7 +21,7 @@ const CHROME=["/home/jeroen/.cache/ms-playwright/chromium-1200/chrome-linux64/ch
   console.log("   status:",status);
   // flip + proof
   const c=page.locator(".card:not(.skeleton)").first();
-  await c.locator('[data-act="flip"]').click(); await page.waitForTimeout(400);
+  await c.locator(".front").click({force:true}); await page.waitForTimeout(400);
   ok(await c.locator(".back .verdict.ok").count()>0,"proof verifies with real bundle");
   await browser.close();
   console.log("\n"+(fails===0?"REAL-CDN TEST PASSED ✓":fails+" FAILED ✗"));

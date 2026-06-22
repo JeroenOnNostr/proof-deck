@@ -76,16 +76,31 @@ const FILE_URL = "file://" + path.resolve("index.html");
   await page.locator("#modeOr").click();
   ok((await page.locator("#shownCount").textContent()) === "21", "clear restores 21");
 
-  // flip first card -> proof OK
+  // verified status pill shows on the front face before flipping
   const card0 = page.locator(".card:not(.skeleton)").first();
-  await card0.locator('[data-act="flip"]').click();
+  ok(await card0.locator(".front .vchip.ok").count() > 0, "front face shows a verified status pill");
+
+  // Read link must NOT flip the card (it opens the reader)
+  await card0.locator(".front .readlink").click();
   await page.waitForTimeout(150);
-  ok((await card0.getAttribute("data-flipped")) === "1", "card flips");
+  ok((await card0.getAttribute("data-flipped")) !== "1", "clicking Read does NOT flip the card");
+  ok(await page.locator("#scrim.show").count() > 0, "Read link opens reader modal");
+  await page.locator("#modalClose").click();
+  await page.waitForTimeout(100);
+
+  // clicking the card FACE itself flips it (the natural instinct)
+  await card0.locator(".front .card-title").click();
+  await page.waitForTimeout(200);
+  ok((await card0.getAttribute("data-flipped")) === "1", "clicking the card face flips it");
   ok(await card0.locator(".back .verdict.ok").count() > 0, "proof face shows OK verdict");
   ok(await card0.locator(".kv .v.match").count() > 0, "inspector: computed id matches (green)");
+  await card0.locator('[data-act="unflip"]').click();
+  await page.waitForTimeout(100);
 
-  // read modal + markdown
-  await card0.locator('[data-act="read"]').click();
+  // read modal + markdown (open via the back face Read button)
+  await card0.locator(".front").click();
+  await page.waitForTimeout(150);
+  await card0.locator('.back [data-act="read"]').click();
   await page.waitForTimeout(150);
   ok(await page.locator("#scrim.show").count() > 0, "reader modal opens");
   const body = await page.locator("#readBody").innerHTML();
@@ -96,9 +111,20 @@ const FILE_URL = "file://" + path.resolve("index.html");
   await page.locator("#tabTamper").click();
   await page.waitForTimeout(100);
   ok(await page.locator("#sandVerdict.ok").count() > 0, "sandbox starts verified");
+  // live crypto readout: original shows matching ids + ok badges
+  ok(await page.locator("#cpComputed.allmatch").count() > 0, "crypto panel: recomputed id matches (green) on original");
+  ok(await page.locator("#cpIdBadge.ok").count() > 0, "crypto panel: id badge ok on original");
+  ok(await page.locator("#cpSigBadge.ok").count() > 0, "crypto panel: signature badge ok on original");
+  const computedBefore = await page.locator("#cpComputed").textContent();
   await page.locator("#sandText").fill((await page.locator("#sandText").inputValue()) + " TAMPERED!");
   await page.waitForTimeout(150);
   ok(await page.locator("#sandVerdict.bad").count() > 0, "sandbox goes RED on tamper");
+  // crypto readout reacts: recomputed id visibly changes, char-diffs appear, badges flip
+  const computedAfter = await page.locator("#cpComputed").textContent();
+  ok(computedBefore && computedAfter && computedBefore !== computedAfter, "recomputed id VISIBLY changes after edit");
+  ok(await page.locator("#cpComputed .diff").count() > 0, "recomputed id shows changed hex chars highlighted");
+  ok(await page.locator("#cpIdBadge.bad").count() > 0, "id badge flips to changed");
+  ok(await page.locator("#cpSigBadge.bad").count() > 0, "signature badge flips to invalid");
   const diffHtml = await page.locator("#sandDiff").innerHTML();
   ok(/class="add"|TAMPERED/.test(diffHtml), "diff shows added text");
   await page.locator("#sandReset").click();
@@ -108,12 +134,28 @@ const FILE_URL = "file://" + path.resolve("index.html");
   await page.waitForTimeout(100);
   ok(await page.locator("#sandVerdict.bad").count() > 0, "'flip one byte' breaks it");
   await page.locator("#modalClose").click();
-
-  // capsule download
   await page.waitForTimeout(100);
+
+  // hashtag list collapses on scroll, expands via toggle
+  ok(await page.locator(".toolbar.collapsed").count() === 0, "tag grid expanded at top");
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await page.waitForTimeout(200);
+  ok(await page.locator(".toolbar.collapsed").count() > 0, "tag grid collapses after scrolling down");
+  ok(await page.locator(".tagbar").isVisible(), "compact tag bar visible when collapsed");
+  await page.locator("#tagToggle").click();
+  await page.waitForTimeout(150);
+  ok(await page.locator(".toolbar.collapsed").count() === 0, "toggle re-expands the tag grid");
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(150);
+
+  // capsule download (ensure card flipped to reach the back-face capsule button)
+  if ((await card0.getAttribute("data-flipped")) !== "1") {
+    await card0.locator(".front").click();
+    await page.waitForTimeout(200);
+  }
   const [dl] = await Promise.all([
     page.waitForEvent("download", { timeout: 4000 }).catch(() => null),
-    card0.locator('[data-act="capsule"]').click(),
+    card0.locator('.back [data-act="capsule"]').click(),
   ]);
   ok(!!dl, "minting a proof capsule triggers a download (" + (dl && dl.suggestedFilename()) + ")");
   if (dl) {

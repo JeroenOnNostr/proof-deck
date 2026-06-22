@@ -23,10 +23,10 @@ const bundle = fs.readFileSync(path.resolve("node_modules/nostr-tools/lib/nostr.
 
   // mint capsule
   const card0 = page.locator(".card:not(.skeleton)").first();
-  await card0.locator('[data-act="flip"]').click();
+  await card0.locator(".front").click();
   const [dl] = await Promise.all([
     page.waitForEvent("download"),
-    card0.locator('[data-act="capsule"]').click(),
+    card0.locator(".back [data-act=\"capsule\"]").click(),
   ]);
   const capPath = path.resolve("_cap.html");
   await dl.saveAs(capPath);

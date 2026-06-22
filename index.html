@@ -140,7 +140,20 @@
   .intake input:focus{outline:none;border-color:var(--orange)}
 
   /* ---------- tag filter ---------- */
-  .tags{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px}
+  /* hashtag filter — collapsible */
+  .tagbar{display:none;align-items:center;gap:10px;margin:10px 0 0;flex-wrap:wrap}
+  .toolbar.collapsed .tagbar{display:flex}
+  .tagtoggle{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px}
+  .tagtoggle .tt-count{font-variant-numeric:tabular-nums;font-size:11px;color:var(--orange-bright);background:rgba(247,147,26,.14);border-radius:999px;padding:1px 8px}
+  .tagtoggle .tt-chev{transition:transform .15s;color:var(--muted)}
+  .toolbar.collapsed .tagtoggle .tt-chev{transform:rotate(-90deg)}
+  .activefilters{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .activefilters:empty::after{content:"no filters — tap Tags to choose";color:var(--muted-2);font-size:12px;font-style:italic}
+  .afchip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink);background:rgba(247,147,26,.16);border:1px solid var(--orange);border-radius:999px;padding:3px 6px 3px 10px;cursor:pointer}
+  .afchip:hover{background:rgba(247,147,26,.28)}
+  .afchip .x{font-weight:700;color:var(--orange-bright);line-height:1}
+  .tags{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px;transition:opacity .15s}
+  .toolbar.collapsed .tags{display:none}
   .tagchip{
     display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
     background:rgba(42,17,64,.55);border:1px solid var(--line);
@@ -190,7 +203,12 @@
     background:linear-gradient(168deg,rgba(58,26,87,.92),rgba(29,10,43,.96));
     box-shadow:0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(168,116,224,.12);
   }
-  .front:hover{border-color:var(--purple-300)}
+  /* the whole front face is the flip target */
+  .front{cursor:pointer;transition:border-color .14s, transform .14s, box-shadow .14s}
+  .front:hover{border-color:var(--purple-300);transform:translateY(-3px);box-shadow:0 16px 48px rgba(0,0,0,.45), inset 0 1px 0 rgba(168,116,224,.18)}
+  .front:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+  .front:hover .flipbtn{background:var(--orange);color:#23120a;border-color:var(--orange)}
+  .front:hover .flipbtn .chev{transform:translateX(2px)}
   .card-top{padding:16px 16px 10px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
   .author{display:flex;align-items:center;gap:10px;min-width:0}
   .avatar{
@@ -198,9 +216,15 @@
     background:var(--purple-600);border:1px solid var(--line)
   }
   .avatar.ph{display:grid;place-items:center;font-weight:700;color:var(--purple-200);font-size:14px}
-  .author .meta{min-width:0}
+  .author .meta{min-width:0;flex:1}
   .author .name{font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .author .when{font-size:11.5px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+  /* small status pill near the author so verified state is visible before flipping */
+  .vchip{flex:0 0 auto;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid;white-space:nowrap}
+  .vchip.ok{color:var(--ok);border-color:rgba(54,211,153,.4);background:rgba(54,211,153,.10)}
+  .vchip.bad{color:var(--bad);border-color:rgba(255,93,108,.45);background:rgba(255,93,108,.12)}
+  .vchip.pending{color:var(--muted-2);border-color:var(--line);background:rgba(91,42,134,.2)}
+  .vchip .vglyph{font-size:10px}
   .card-title{
     font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.28;color:#fff;
     display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:0
@@ -210,14 +234,24 @@
     display:flex;align-items:center;justify-content:space-between;gap:8px;
     padding:10px 14px;border-top:1px solid var(--line);background:rgba(13,5,20,.35)
   }
-  .ftags{display:flex;gap:5px;flex-wrap:wrap;overflow:hidden;max-height:22px}
+  .ftags{display:flex;gap:5px;flex-wrap:wrap;overflow:hidden;max-height:22px;flex:1;min-width:0}
   .ftag{font-size:10.5px;color:var(--purple-200);background:rgba(91,42,134,.45);border-radius:999px;padding:1px 7px;white-space:nowrap}
-  .flipbtn{
-    appearance:none;border:1px solid var(--orange-dim);background:rgba(247,147,26,.12);
-    color:var(--orange-bright);font-size:11.5px;font-weight:700;letter-spacing:.03em;
-    padding:5px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px
+  .foot-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .readlink{
+    font-size:11.5px;font-weight:600;color:var(--purple-200);cursor:pointer;
+    padding:5px 8px;border-radius:8px;white-space:nowrap;border:1px solid transparent
   }
-  .flipbtn:hover{background:rgba(247,147,26,.22)}
+  .readlink:hover{color:#fff;background:rgba(91,42,134,.5);text-decoration:none}
+  .readlink:focus-visible{outline:2px solid var(--purple-300);outline-offset:1px}
+  /* clearly a button: solid border + bg + chevron that animates */
+  .flipbtn{
+    appearance:none;border:1px solid var(--orange);background:rgba(247,147,26,.18);
+    color:var(--orange-bright);font-size:11.5px;font-weight:800;letter-spacing:.04em;
+    padding:6px 12px;border-radius:999px;cursor:pointer;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:6px;transition:background .14s, color .14s, border-color .14s
+  }
+  .flipbtn:hover{background:var(--orange);color:#23120a}
+  .flipbtn .chev{display:inline-block;transition:transform .14s}
 
   /* tiny verify glyph on the front, set after auto-verify */
   .vglyph{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
@@ -325,6 +359,20 @@
   .sand-intro b{color:var(--orange-bright)}
   .sand-grid{display:grid;gap:16px;grid-template-columns:1fr}
   .sand-verdict{position:sticky;top:62px;z-index:1}
+  /* live crypto readout in the tamper sandbox */
+  .cryptopanel{background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+  .cp-row{display:flex;flex-direction:column;gap:3px}
+  .cp-k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange)}
+  .cp-hint{text-transform:none;letter-spacing:0;color:var(--muted-2);font-size:10px}
+  .cp-v{font-family:var(--mono);font-size:11.5px;word-break:break-all;line-height:1.55;color:var(--muted)}
+  .cp-v .same{color:var(--muted-2)}
+  .cp-v .diff{color:var(--bad);background:rgba(255,93,108,.22);border-radius:2px}
+  .cp-v.allmatch{color:var(--ok)}
+  .cp-status{flex-direction:row;gap:8px;margin-top:2px}
+  .cp-badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;border:1px solid;display:inline-flex;align-items:center;gap:6px;transition:.15s}
+  .cp-badge.ok{color:var(--ok);border-color:rgba(54,211,153,.4);background:rgba(54,211,153,.1)}
+  .cp-badge.bad{color:var(--bad);border-color:rgba(255,93,108,.45);background:rgba(255,93,108,.14)}
+  .cp-badge::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
   .sand-edit label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);display:block;margin-bottom:6px}
   .sand-edit textarea{
     width:100%;min-height:150px;resize:vertical;background:rgba(13,5,20,.8);border:1px solid var(--line);
@@ -383,6 +431,13 @@
         <button class="ctrl" id="naddrGo">Add</button>
       </div>
     </div>
+    <div class="tagbar">
+      <button class="ctrl tagtoggle" id="tagToggle" aria-expanded="true" aria-controls="tags">
+        <span class="tt-label">Tags</span> <span class="tt-count" id="tagToggleCount">0</span>
+        <span class="tt-chev">▾</span>
+      </button>
+      <div class="activefilters" id="activeFilters" aria-label="Active filters"></div>
+    </div>
     <div class="tags" id="tags" aria-label="Hashtags"></div>
   </div>
 
@@ -433,6 +488,21 @@
         <div class="sand-grid">
           <div class="verdict pending sand-verdict" id="sandVerdict">
             <span class="big">⏳</span><span><span class="vt">Verifying…</span><span class="vs"></span></span>
+          </div>
+          <!-- live crypto readout: watch the recomputed id + signature change as you type -->
+          <div class="cryptopanel" id="sandCrypto">
+            <div class="cp-row">
+              <span class="cp-k">claimed id <span class="cp-hint">(what the author signed)</span></span>
+              <code class="cp-v" id="cpClaimed"></code>
+            </div>
+            <div class="cp-row">
+              <span class="cp-k">recomputed id <span class="cp-hint">(SHA-256 of these bytes, live)</span></span>
+              <code class="cp-v" id="cpComputed"></code>
+            </div>
+            <div class="cp-row cp-status">
+              <span class="cp-badge" id="cpIdBadge">id</span>
+              <span class="cp-badge" id="cpSigBadge">signature</span>
+            </div>
           </div>
           <div class="sand-edit">
             <label for="sandText">Article content (signed bytes) — edit me</label>
@@ -734,7 +804,8 @@
   function renderTags() {
     const wrap = $("#tags");
     const counts = tagCounts();
-    if (!counts.length) { wrap.innerHTML = ""; return; }
+    $("#tagToggleCount").textContent = counts.length;
+    if (!counts.length) { wrap.innerHTML = ""; renderActiveFilters(); return; }
     wrap.innerHTML = counts.map(([t, c]) => {
       const on = state.selectedTags.has(t) ? "1" : "0";
       return `<label class="tagchip" data-on="${on}" data-tag="${escapeHtml(t)}">
@@ -746,11 +817,25 @@
     $$(".tagchip", wrap).forEach((el) => {
       el.addEventListener("click", (e) => {
         e.preventDefault();
-        const t = el.dataset.tag;
-        if (state.selectedTags.has(t)) state.selectedTags.delete(t); else state.selectedTags.add(t);
-        renderTags(); render();
+        toggleTag(el.dataset.tag);
       });
     });
+    renderActiveFilters();
+  }
+  function toggleTag(t) {
+    if (state.selectedTags.has(t)) state.selectedTags.delete(t); else state.selectedTags.add(t);
+    renderTags(); render();
+  }
+  // The compact bar shown when the tag grid is collapsed: active filters as
+  // removable chips, so you always see what's filtering while scrolling.
+  function renderActiveFilters() {
+    const host = $("#activeFilters");
+    const sel = [...state.selectedTags];
+    if (!sel.length) { host.innerHTML = ""; return; }
+    host.innerHTML = sel.map((t) =>
+      `<span class="afchip" data-tag="${escapeHtml(t)}" title="Remove filter">#${escapeHtml(t)} <span class="x">×</span></span>`
+    ).join("");
+    $$(".afchip", host).forEach((el) => el.addEventListener("click", () => toggleTag(el.dataset.tag)));
   }
   function visibleArticles() {
     if (!state.selectedTags.size) return state.articles;
@@ -804,8 +889,9 @@
     return `
     <div class="card" data-idx="${idx}" data-flipped="0">
       <div class="inner">
-        <!-- PURPLE FACE : who / identity -->
-        <div class="face front">
+        <!-- PURPLE FACE : who / identity. The whole face flips to the proof. -->
+        <div class="face front" data-act="flip" role="button" tabindex="0"
+             aria-label="Flip to verify: ${escapeHtml(a.title)}">
           <div class="card-top">
             <div class="author">
               ${avatarHtml(p, a.event.pubkey)}
@@ -813,13 +899,17 @@
                 <div class="name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
                 <div class="when" title="${escapeHtml(fmtDate(a.ts))}">${escapeHtml(fmtDate(a.ts))} · ${escapeHtml(timeAgo(a.ts))}</div>
               </div>
+              <span class="vchip ${a.proof ? (a.proof.ok ? "ok" : "bad") : "pending"}" title="Re-verified in your browser">${vglyph(a.proof)}</span>
             </div>
             <h3 class="card-title">${escapeHtml(a.title)}</h3>
             ${a.summary ? `<div class="card-sum">${escapeHtml(a.summary)}</div>` : ""}
           </div>
           <div class="card-foot">
             <div class="ftags">${ftags}</div>
-            <button class="flipbtn" data-act="flip">${vglyph(a.proof)} ▸</button>
+            <div class="foot-actions">
+              <a class="readlink" data-act="read" role="button" tabindex="0">Read</a>
+              <span class="flipbtn" data-act="flip">Verify <span class="chev">▸</span></span>
+            </div>
           </div>
         </div>
         <!-- ORANGE FACE : the proof / math -->
@@ -890,10 +980,11 @@
     $$(".card", deck).forEach((card) => {
       const idx = parseInt(card.dataset.idx, 10);
       const a = state.articles[idx];
-      card.addEventListener("click", (e) => {
+      const handle = (e) => {
         const btn = e.target.closest("[data-act]");
         if (!btn) return;
         const act = btn.dataset.act;
+        if (act === "read" || act === "tamper") e.stopPropagation();  // don't also flip
         if (act === "flip") { card.dataset.flipped = "1"; lazyWitness(card, a); }
         else if (act === "unflip") card.dataset.flipped = "0";
         else if (act === "read") openModal(a, "read");
@@ -901,6 +992,14 @@
         else if (act === "witness") { card.dataset.flipped = "1"; runWitness(card, a, true); }
         else if (act === "capsule") mintCapsule(a);
         else if (act === "naddr") copy(naddrOf(a.event), "naddr copied");
+      };
+      card.addEventListener("click", handle);
+      // keyboard: Enter/Space on the focusable face or Read link
+      card.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        if (!e.target.closest("[data-act][tabindex]")) return;
+        e.preventDefault();
+        handle(e);
       });
     });
   }
@@ -1148,7 +1247,36 @@ Trust the math, not where you got this file.</p>
       v.className = "verdict bad sand-verdict";
       v.innerHTML = `<span class="big">✗</span><span><span class="vt">Tampered — the proof fails</span><span class="vs">${escapeHtml(why)}</span></span>`;
     }
+    renderCrypto(pr);
     renderDiff(ta._original, ta.value);
+  }
+
+  // Show the actual cryptographic effect of an edit: the recomputed id (with the
+  // exact hex characters that changed vs the claimed id) and the live id/sig status.
+  function renderCrypto(pr) {
+    const claimed = pr.claimedId || "";
+    const computed = pr.computedId || "";
+    $("#cpClaimed").textContent = claimed;
+    const cv = $("#cpComputed");
+    if (pr.idMatch) {
+      cv.className = "cp-v allmatch";
+      cv.textContent = computed;
+    } else {
+      // per-hex-char diff against the claimed id
+      cv.className = "cp-v";
+      const n = Math.max(claimed.length, computed.length);
+      let html = "";
+      for (let i = 0; i < n; i++) {
+        const c = computed[i] || "";
+        html += (c && c === claimed[i]) ? `<span class="same">${c}</span>` : `<span class="diff">${escapeHtml(c || "·")}</span>`;
+      }
+      cv.innerHTML = html;
+    }
+    const idB = $("#cpIdBadge"), sigB = $("#cpSigBadge");
+    idB.className = "cp-badge " + (pr.idMatch ? "ok" : "bad");
+    idB.textContent = pr.idMatch ? "id matches" : "id changed";
+    sigB.className = "cp-badge " + (pr.sigOk ? "ok" : "bad");
+    sigB.textContent = pr.sigOk ? "signature valid" : "signature invalid";
   }
 
   // word-level LCS diff
@@ -1258,6 +1386,39 @@ Trust the math, not where you got this file.</p>
 
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
     $("#viewSource").addEventListener("click", (e) => { e.preventDefault(); window.location.href = "view-source:" + window.location.href; });
+
+    wireTagCollapse();
+  }
+
+  // The full hashtag grid is big; collapse it once the reader scrolls into the
+  // deck, leaving a compact "Tags (N) ▾" bar + active-filter chips. The toggle
+  // lets you expand it on demand; once toggled, respect that choice.
+  function wireTagCollapse() {
+    const toolbar = $(".toolbar");
+    let pinnedOpen = false;   // user expanded it on purpose; hold open until they scroll again
+    let pinAt = 0;            // scrollY when pinned, to ignore the reflow-induced scroll
+    const setCollapsed = (on) => {
+      toolbar.classList.toggle("collapsed", on);
+      $("#tagToggle").setAttribute("aria-expanded", String(!on));
+    };
+    $("#tagToggle").addEventListener("click", () => {
+      const willOpen = toolbar.classList.contains("collapsed");
+      pinnedOpen = willOpen;            // if opening, keep it open until the user scrolls
+      pinAt = window.scrollY;
+      setCollapsed(!willOpen);
+    });
+    // Collapse once scrolled into the deck; expand near the top. A manual expand is
+    // honored until the user actually scrolls (>40px from where they pinned) — the
+    // threshold ignores the small reflow jump caused by the grid appearing.
+    const onScroll = () => {
+      if (pinnedOpen) {
+        if (Math.abs(window.scrollY - pinAt) > 40) pinnedOpen = false;
+        else return;
+      }
+      setCollapsed(window.scrollY > 200);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
   }
 
   // =====================================================================
