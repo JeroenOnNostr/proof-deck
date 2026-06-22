@@ -3,3 +3,4 @@ package-lock.json
 screenshot-*.png
 _cap*.html
 test-capsule.html
+dbg-toggle.js
