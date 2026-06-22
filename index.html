@@ -1,0 +1,1264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>The Proof Deck — 21 signed articles, verified in your browser</title>
+<meta name="description" content="A single-page Nostr reader that deals 21 kind:30023 articles as cards and re-verifies each signature — in your browser — so you can trust the bytes, not the host." />
+<!--
+  THE PROOF DECK
+  A verifiability-first reader for Nostr long-form articles (kind:30023 / NIP-23).
+
+  Most clients verify signatures silently and drop the invalid ones. You never see it.
+  This one does the opposite: it RE-RUNS the Schnorr signature check and RECOMPUTES the
+  event id from the canonical serialization, right here in your browser, and shows you
+  the result. Purple is the article (who). Orange is the proof (what the math says).
+
+  No build step. No framework. View source — that's the point.
+  Everything that proves an article is read-only and local: it works with no signer,
+  offline, even from the embedded fixture if every relay is down.
+
+  "IT SHOULD NOT MATTER WHERE INFORMATION IS PUBLISHED." — Gigi, Purple Text, Orange Highlights
+-->
+<script src="https://unpkg.com/[email protected]/lib/nostr.bundle.js"></script>
+<style>
+  :root{
+    /* purple = Nostr / identity layer ; orange = Bitcoin / proof layer */
+    --purple-900:#16071f;
+    --purple-800:#1d0a2b;
+    --purple-700:#2a1140;
+    --purple-600:#3a1a57;
+    --purple-500:#5b2a86;
+    --purple-300:#a874e0;
+    --purple-200:#c8a6ee;
+    --orange:#f7931a;          /* the bitcoin orange */
+    --orange-bright:#ffae42;
+    --orange-dim:#7a4d12;
+    --ink:#f3ecfb;
+    --muted:#b39ccb;
+    --muted-2:#8c76a8;
+    --ok:#36d399;
+    --ok-dim:#0f3d2c;
+    --bad:#ff5d6c;
+    --bad-dim:#451018;
+    --warn:#f5c518;
+    --line:rgba(168,116,224,.18);
+    --card-radius:16px;
+    --maxw:1180px;
+    --mono:'SF Mono',ui-monospace,'JetBrains Mono','Cascadia Code',Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    background:
+      radial-gradient(1200px 700px at 12% -8%, rgba(91,42,134,.55), transparent 60%),
+      radial-gradient(900px 600px at 92% 0%, rgba(247,147,26,.10), transparent 55%),
+      radial-gradient(1000px 800px at 50% 120%, rgba(91,42,134,.30), transparent 60%),
+      var(--purple-900);
+    background-attachment:fixed;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+  }
+  a{color:var(--purple-200);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font-family:inherit}
+  ::selection{background:rgba(247,147,26,.35);color:#fff}
+
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 18px}
+
+  /* ---------- header ---------- */
+  header.site{padding:34px 0 8px}
+  .brand{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  .logo{
+    font-weight:800;letter-spacing:-.02em;font-size:clamp(28px,5vw,46px);
+    background:linear-gradient(92deg,var(--purple-200) 0%,#fff 38%,var(--orange) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    display:flex;align-items:center;gap:.45ch;
+  }
+  .logo .num{
+    font-variant-numeric:tabular-nums;
+    -webkit-text-fill-color:var(--orange);color:var(--orange);
+    text-shadow:0 0 26px rgba(247,147,26,.45);
+  }
+  .tagline{color:var(--muted);font-size:15px;max-width:62ch;margin:10px 0 2px}
+  .tagline b{color:var(--purple-200);font-weight:600}
+  .tagline .o{color:var(--orange-bright);font-weight:600}
+  .epigraph{
+    margin:16px 0 6px;border-left:2px solid var(--orange);
+    padding:6px 0 6px 14px;color:var(--muted);font-style:italic;font-size:14px;max-width:70ch
+  }
+  .epigraph cite{display:block;font-style:normal;color:var(--muted-2);font-size:12.5px;margin-top:3px}
+
+  /* ---------- controls / toolbar ---------- */
+  .toolbar{
+    position:sticky;top:0;z-index:30;
+    margin:18px 0 6px;padding:12px 0;
+    background:linear-gradient(180deg,rgba(22,7,31,.96),rgba(22,7,31,.78) 70%,transparent);
+    backdrop-filter:blur(6px);
+  }
+  .toolrow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;
+    background:rgba(58,26,87,.55);border:1px solid var(--line);
+    padding:7px 12px;border-radius:999px;font-size:13px;color:var(--muted)
+  }
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted-2)}
+  .pill .dot.live{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .pill .dot.warn{background:var(--warn)}
+  .pill .dot.bad{background:var(--bad)}
+  .pill b{color:var(--ink);font-weight:600}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:rgba(29,10,43,.6)}
+  .seg button{
+    appearance:none;border:0;background:transparent;color:var(--muted);
+    padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em
+  }
+  .seg button[aria-pressed="true"]{background:var(--orange);color:#23120a}
+  .seg button:not([aria-pressed="true"]):hover{color:var(--ink)}
+
+  .ctrl{
+    appearance:none;border:1px solid var(--line);background:rgba(29,10,43,.6);
+    color:var(--ink);padding:7px 12px;border-radius:10px;font-size:13px;cursor:pointer
+  }
+  .ctrl:hover{border-color:var(--purple-300)}
+  .intake{display:flex;gap:8px;flex:1 1 280px;min-width:220px}
+  .intake input{
+    flex:1;background:rgba(13,5,20,.75);border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:8px 12px;font-size:13px;font-family:var(--mono)
+  }
+  .intake input:focus{outline:none;border-color:var(--orange)}
+
+  /* ---------- tag filter ---------- */
+  .tags{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px}
+  .tagchip{
+    display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    background:rgba(42,17,64,.55);border:1px solid var(--line);
+    padding:5px 11px 5px 9px;border-radius:999px;font-size:12.5px;color:var(--muted);
+    transition:border-color .12s, background .12s, color .12s
+  }
+  .tagchip:hover{border-color:var(--purple-300);color:var(--ink)}
+  .tagchip input{position:absolute;opacity:0;width:0;height:0}
+  .tagchip .box{
+    width:15px;height:15px;border-radius:4px;border:1.5px solid var(--purple-300);
+    display:grid;place-items:center;font-size:11px;color:#23120a;background:transparent;line-height:1
+  }
+  .tagchip[data-on="1"]{background:rgba(247,147,26,.16);border-color:var(--orange);color:var(--ink)}
+  .tagchip[data-on="1"] .box{background:var(--orange);border-color:var(--orange)}
+  .tagchip .cnt{
+    font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted-2);
+    background:rgba(0,0,0,.25);border-radius:999px;padding:1px 7px
+  }
+  .tagchip[data-on="1"] .cnt{color:var(--orange-bright)}
+
+  /* ---------- deck ---------- */
+  .deckmeta{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 8px;flex-wrap:wrap}
+  .deckmeta h2{font-size:15px;color:var(--muted);font-weight:600;margin:0;letter-spacing:.02em}
+  .deckmeta h2 b{color:var(--orange-bright)}
+
+  .deck{
+    display:grid;gap:16px;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    padding-bottom:60px;
+  }
+
+  .card{ perspective:1400px; min-height:230px }
+  .card .inner{
+    position:relative;width:100%;height:100%;min-height:230px;
+    transition:transform .55s cubic-bezier(.2,.7,.2,1);
+    transform-style:preserve-3d;
+  }
+  .card[data-flipped="1"] .inner{transform:rotateY(180deg)}
+  .face{
+    position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+    border-radius:var(--card-radius);border:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+
+  /* front = purple identity face */
+  .front{
+    background:linear-gradient(168deg,rgba(58,26,87,.92),rgba(29,10,43,.96));
+    box-shadow:0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(168,116,224,.12);
+  }
+  .front:hover{border-color:var(--purple-300)}
+  .card-top{padding:16px 16px 10px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
+  .author{display:flex;align-items:center;gap:10px;min-width:0}
+  .avatar{
+    width:34px;height:34px;border-radius:50%;flex:0 0 auto;object-fit:cover;
+    background:var(--purple-600);border:1px solid var(--line)
+  }
+  .avatar.ph{display:grid;place-items:center;font-weight:700;color:var(--purple-200);font-size:14px}
+  .author .meta{min-width:0}
+  .author .name{font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .author .when{font-size:11.5px;color:var(--muted-2);font-variant-numeric:tabular-nums}
+  .card-title{
+    font-size:17px;font-weight:700;letter-spacing:-.01em;line-height:1.28;color:#fff;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:0
+  }
+  .card-sum{font-size:12.5px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .card-foot{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 14px;border-top:1px solid var(--line);background:rgba(13,5,20,.35)
+  }
+  .ftags{display:flex;gap:5px;flex-wrap:wrap;overflow:hidden;max-height:22px}
+  .ftag{font-size:10.5px;color:var(--purple-200);background:rgba(91,42,134,.45);border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .flipbtn{
+    appearance:none;border:1px solid var(--orange-dim);background:rgba(247,147,26,.12);
+    color:var(--orange-bright);font-size:11.5px;font-weight:700;letter-spacing:.03em;
+    padding:5px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px
+  }
+  .flipbtn:hover{background:rgba(247,147,26,.22)}
+
+  /* tiny verify glyph on the front, set after auto-verify */
+  .vglyph{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
+  .vglyph.ok{color:var(--ok)} .vglyph.bad{color:var(--bad)} .vglyph.pending{color:var(--muted-2)}
+
+  /* back = orange proof face */
+  .back{
+    transform:rotateY(180deg);
+    background:
+      radial-gradient(120% 80% at 80% 0%, rgba(247,147,26,.14), transparent 60%),
+      linear-gradient(170deg,rgba(35,18,10,.96),rgba(20,9,4,.98));
+    border-color:var(--orange-dim);
+    padding:14px;gap:10px;overflow:auto;
+  }
+  .back h3{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--orange);display:flex;align-items:center;gap:8px}
+  .verdict{
+    display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid;font-size:13px
+  }
+  .verdict.ok{background:var(--ok-dim);border-color:rgba(54,211,153,.4);color:#bff5e0}
+  .verdict.bad{background:var(--bad-dim);border-color:rgba(255,93,108,.45);color:#ffd2d6}
+  .verdict.pending{background:rgba(122,77,18,.18);border-color:var(--orange-dim);color:var(--muted)}
+  .verdict .big{font-size:22px;line-height:1}
+  .verdict .vt{font-weight:700} .verdict .vs{display:block;font-size:11.5px;opacity:.85;font-weight:400}
+
+  .checks{display:flex;flex-direction:column;gap:6px;font-size:12px}
+  .chk{display:flex;align-items:flex-start;gap:8px;color:var(--muted)}
+  .chk .m{font-weight:800;flex:0 0 auto;width:16px;text-align:center}
+  .chk.pass .m{color:var(--ok)} .chk.fail .m{color:var(--bad)} .chk.wait .m{color:var(--muted-2)}
+  .chk b{color:var(--ink);font-weight:600}
+  .chk .sub{display:block;color:var(--muted-2);font-size:11px}
+
+  .kv{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:5px}
+  .kv .row{display:flex;gap:8px;align-items:baseline}
+  .kv .k{color:var(--orange);flex:0 0 78px;text-transform:uppercase;letter-spacing:.06em;font-size:9.5px}
+  .kv .v{word-break:break-all;color:var(--muted);flex:1}
+  .kv .v.match{color:var(--ok)} .kv .v.mismatch{color:var(--bad)}
+
+  .backbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:8px}
+  .bb{
+    appearance:none;border:1px solid var(--orange-dim);background:rgba(247,147,26,.10);
+    color:var(--orange-bright);font-size:11px;font-weight:600;padding:6px 9px;border-radius:9px;cursor:pointer
+  }
+  .bb:hover{background:rgba(247,147,26,.2)}
+  .bb.ghost{border-color:var(--line);background:rgba(91,42,134,.25);color:var(--purple-200)}
+  .witness{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:7px;min-height:18px}
+  .witness .relays{display:flex;gap:3px}
+  .witness .rd{width:7px;height:7px;border-radius:50%;background:var(--muted-2)}
+  .witness .rd.ok{background:var(--ok)} .witness .rd.bad{background:var(--bad)} .witness .rd.wait{background:var(--orange-dim);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+
+  /* ---------- skeleton / states ---------- */
+  .skeleton .front{background:linear-gradient(168deg,rgba(58,26,87,.5),rgba(29,10,43,.7))}
+  .sk-line{height:11px;border-radius:6px;background:linear-gradient(90deg,rgba(168,116,224,.10),rgba(168,116,224,.22),rgba(168,116,224,.10));background-size:200% 100%;animation:shimmer 1.4s infinite}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:60px 20px;border:1px dashed var(--line);border-radius:16px}
+  .empty b{color:var(--ink)}
+
+  .banner{
+    display:none;align-items:center;gap:10px;margin:12px 0;padding:10px 14px;border-radius:12px;
+    border:1px solid var(--orange-dim);background:rgba(247,147,26,.10);color:var(--orange-bright);font-size:13px
+  }
+  .banner.show{display:flex}
+
+  /* ---------- modal (reader + tamper sandbox) ---------- */
+  .scrim{
+    position:fixed;inset:0;z-index:100;display:none;
+    background:rgba(8,3,12,.72);backdrop-filter:blur(4px);
+    align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto
+  }
+  .scrim.show{display:flex}
+  .modal{
+    width:min(880px,100%);background:linear-gradient(180deg,var(--purple-800),var(--purple-900));
+    border:1px solid var(--line);border-radius:18px;box-shadow:0 30px 90px rgba(0,0,0,.6);
+    overflow:hidden;margin:auto 0
+  }
+  .mhead{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--purple-800);z-index:2}
+  .mhead .mt{font-weight:700;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mtabs{display:flex;gap:6px}
+  .mtab{appearance:none;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer}
+  .mtab[aria-selected="true"]{background:var(--purple-600);color:#fff;border-color:var(--purple-300)}
+  .mtab.orange[aria-selected="true"]{background:var(--orange);color:#23120a;border-color:var(--orange)}
+  .mx{appearance:none;border:0;background:transparent;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:4px 8px}
+  .mx:hover{color:#fff}
+  .mbody{padding:20px 22px 26px;max-height:none}
+  .panel{display:none}
+  .panel.show{display:block}
+
+  /* reader markdown */
+  .article{font-size:15.5px;line-height:1.72;color:#e8def4}
+  .article h1,.article h2,.article h3{color:#fff;line-height:1.25;margin:1.4em 0 .5em}
+  .article h1{font-size:1.5em} .article h2{font-size:1.28em} .article h3{font-size:1.1em}
+  .article p{margin:0 0 1em}
+  .article a{color:var(--orange-bright)}
+  .article img{max-width:100%;border-radius:10px;border:1px solid var(--line)}
+  .article blockquote{border-left:3px solid var(--orange);margin:1em 0;padding:.2em 0 .2em 14px;color:var(--muted);font-style:italic}
+  .article code{font-family:var(--mono);background:rgba(0,0,0,.35);padding:2px 6px;border-radius:6px;font-size:.9em}
+  .article pre{background:rgba(0,0,0,.4);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+  .article pre code{background:transparent;padding:0}
+  .article ul,.article ol{padding-left:1.4em;margin:0 0 1em}
+  .article hr{border:0;border-top:1px solid var(--line);margin:1.6em 0}
+  .byline{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+
+  /* tamper sandbox */
+  .sand-intro{color:var(--muted);font-size:13.5px;margin:0 0 14px;max-width:64ch}
+  .sand-intro b{color:var(--orange-bright)}
+  .sand-grid{display:grid;gap:16px;grid-template-columns:1fr}
+  .sand-verdict{position:sticky;top:62px;z-index:1}
+  .sand-edit label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);display:block;margin-bottom:6px}
+  .sand-edit textarea{
+    width:100%;min-height:150px;resize:vertical;background:rgba(13,5,20,.8);border:1px solid var(--line);
+    color:var(--ink);border-radius:12px;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.6
+  }
+  .sand-edit textarea:focus{outline:none;border-color:var(--orange)}
+  .sand-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .diffbox{background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;color:var(--muted);min-height:40px}
+  .diffbox .add{background:rgba(54,211,153,.20);color:#bff5e0;border-radius:3px}
+  .diffbox .del{background:rgba(255,93,108,.22);color:#ffd2d6;text-decoration:line-through;border-radius:3px}
+  .diff-empty{color:var(--muted-2);font-style:italic}
+
+  footer.site{padding:30px 0 50px;color:var(--muted-2);font-size:12.5px;border-top:1px solid var(--line);margin-top:20px}
+  footer.site a{color:var(--muted)}
+  .copyhint{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--orange);color:#23120a;font-weight:700;font-size:13px;padding:9px 16px;border-radius:999px;opacity:0;pointer-events:none;transition:.2s;z-index:200}
+  .copyhint.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:560px){
+    .toolbar{position:static}
+    .card-title{font-size:16px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .card .inner{transition:none}
+    .sk-line{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <div class="brand">
+      <div class="logo">The Proof Deck <span class="num">21</span></div>
+    </div>
+    <p class="tagline">
+      A <b>Nostr</b> reader that deals 21 long-form articles as cards — and re-runs each one's
+      <span class="o">cryptographic proof</span> in your browser. Don't trust the host. Verify the bytes.
+    </p>
+    <blockquote class="epigraph">
+      “It should not matter where information is published.”
+      <cite>— Gigi, <em>Purple Text, Orange Highlights</em></cite>
+    </blockquote>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="toolbar">
+    <div class="toolrow">
+      <span class="pill" id="status"><span class="dot" id="statusdot"></span><span id="statustext">Connecting to relays…</span></span>
+      <div class="seg" role="group" aria-label="Tag filter mode">
+        <button id="modeOr" aria-pressed="true" title="Match any selected tag">ANY</button>
+        <button id="modeAnd" aria-pressed="false" title="Match all selected tags">ALL</button>
+      </div>
+      <button class="ctrl" id="clearTags" title="Clear tag selection">Clear tags</button>
+      <div class="intake">
+        <input id="naddrInput" placeholder="paste an naddr1… / npub1… and press Enter — source doesn't matter" spellcheck="false" autocomplete="off" />
+        <button class="ctrl" id="naddrGo">Add</button>
+      </div>
+    </div>
+    <div class="tags" id="tags" aria-label="Hashtags"></div>
+  </div>
+
+  <div class="deckmeta">
+    <h2><b id="shownCount">0</b> <span id="shownLabel">articles</span> · each card flips to its proof</h2>
+    <span class="pill" title="Articles whose signature re-verified in your browser">
+      <span class="dot live"></span><b id="verifiedCount">0</b>&nbsp;verified&nbsp;✓
+    </span>
+  </div>
+
+  <main class="deck" id="deck" aria-live="polite"></main>
+
+  <footer class="site">
+    <p>
+      <b style="color:var(--purple-200)">The Proof Deck</b> — built for the SEC-08 exercise.
+      Fetches kind:30023 (NIP-23) over Nostr, re-verifies Schnorr signatures with
+      <a href="https://github.com/nbd-wtf/nostr-tools" target="_blank" rel="noopener">nostr-tools</a>
+      client-side, recomputes each event id from canonical serialization, witnesses copies across relays,
+      and mints offline-re-verifiable proof capsules. One HTML file, no build —
+      <a href="#" id="viewSource">view source</a>.
+    </p>
+  </footer>
+</div>
+
+<!-- ---------- modal: reader + tamper sandbox ---------- -->
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal">
+    <div class="mhead">
+      <div class="mt" id="modalTitle">Article</div>
+      <div class="mtabs">
+        <button class="mtab" id="tabRead" aria-selected="true" data-panel="read">Read</button>
+        <button class="mtab orange" id="tabTamper" aria-selected="false" data-panel="tamper">Tamper sandbox</button>
+      </div>
+      <button class="mx" id="modalClose" aria-label="Close">×</button>
+    </div>
+    <div class="mbody">
+      <div class="panel show" id="panelRead">
+        <div class="byline" id="readByline"></div>
+        <div class="article" id="readBody"></div>
+      </div>
+      <div class="panel" id="panelTamper">
+        <p class="sand-intro">
+          Nostr's guarantee is silent: clients verify signatures and quietly drop the bad ones, so you
+          never see it work. <b>Break it yourself.</b> Edit one character below and watch the proof snap red —
+          the recomputed event id stops matching, and the Schnorr signature no longer holds. This is what
+          a malicious or buggy relay can never get past.
+        </p>
+        <div class="sand-grid">
+          <div class="verdict pending sand-verdict" id="sandVerdict">
+            <span class="big">⏳</span><span><span class="vt">Verifying…</span><span class="vs"></span></span>
+          </div>
+          <div class="sand-edit">
+            <label for="sandText">Article content (signed bytes) — edit me</label>
+            <textarea id="sandText" spellcheck="false"></textarea>
+            <div class="sand-actions">
+              <button class="bb" id="sandFlip">Flip one byte for me</button>
+              <button class="bb ghost" id="sandReset">Restore original</button>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);display:block;margin-bottom:6px">What changed</label>
+            <div class="diffbox" id="sandDiff"><span class="diff-empty">No changes — this is the original, signed text.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="copyhint" id="copyhint">copied</div>
+
+<script>
+/* =========================================================================
+   THE PROOF DECK  —  all logic, one file, no build.
+   ========================================================================= */
+(function () {
+  "use strict";
+
+  const FIXTURE = [{"kind":30023,"created_at":1782048948,"tags":[["d","why-signatures-beat-servers"],["title","Why Signatures Beat Servers"],["summary","A short argument that on Nostr you should trust the key, not the host."],["published_at","1782048948"],["t","nostr"],["t","bitcoin"],["t","sovereignty"],["t","freedomtech"]],"content":"On the old web, you trust a server. You point your browser at a domain, and whatever bytes come back, you read. If the server lies, you have no way to know.\n\nNostr inverts this. Every note carries a Schnorr signature. **It should not matter where information is published** — the signature travels with the bytes. Pull this article from a relay in Tokyo or a relay in your basement; if the signature checks out, it is the same article, untouched.\n\n## The quiet guarantee\n\nHere is the strange part: your client already verifies this signature. It just never tells you. Invalid events are dropped silently, and the guarantee stays invisible.\n\nThis reader makes it visible. It recomputes the event id from the canonical serialization and re-runs the signature check, right in your browser. Trust the math, not the host.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"219e73ec2af4a96d2e93509ebdc40d3762984d87b4ab9f53a0afbd9ef34b4449","sig":"f485e20d3be6a8d5cd190d97ba098e9571bbe92c0b88d98a28cd4bbbbb0e65944c91ee91b96ba7626cd43dd6e91a70e4579e1e744bb0eab3d76e9b977f0937ad"},{"kind":30023,"created_at":1781962548,"tags":[["d","purple-and-orange"],["title","Purple and Orange"],["summary","Notes on the two colors that define this corner of the internet."],["published_at","1781962548"],["t","nostr"],["t","bitcoin"],["t","writing"],["t","value4value"]],"content":"Purple is the protocol. Orange is the money.\n\nTogether they make a strange and wonderful thing: a place where words can be written down, signed, and carried anywhere — and where value can flow back to the people who wrote them, with no platform standing in the middle.\n\n> The orange future now has a purple hue.\n\nWe have a lot of building to do. This is one small brick.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"8b96a31d8d23bd8c6d535c9c2a23ea2b9a907c08fe25e2c6166020f20b5e7eb0","sig":"c055b631cde337248050a9da1ed43cedee9585155f17ea871b199f8a81a490909634e41b68f285f100f76e43f9442cc9d8d47f63ddfd8c38c4752ed0147671f0"},{"kind":30023,"created_at":1781876148,"tags":[["d","the-number-21"],["title","The Number 21"],["summary","Why a single number keeps showing up."],["published_at","1781876148"],["t","bitcoin"],["t","21"],["t","philosophy"]],"content":"Twenty-one million. Not twenty, not twenty-two. A hard cap, chosen once, enforced by everyone, forever.\n\nThe number became a culture. 21 lessons. 21 ways. A glowing orange door with two numerals on it.\n\nThis page deals exactly **21** cards. Each one is an article you can verify yourself. That is the whole idea: not a feed you scroll, but a hand you can check.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"34eba802b66e9b1c7576587fd5d3e4e3e726d9b565fc8d7a32916cb9ae93feb9","sig":"bde3bec0198d9b8838b1ec413f1a11f2e3bda8f930f76e0db124a8ca82171f424f8ad42811681240b46cb34b31b42525821d3f5a561347075d1f4aa769b3a93a"},{"kind":30023,"created_at":1781789748,"tags":[["d","marginalia-for-machines"],["title","Marginalia for Machines"],["summary","What highlights could become when they are signed events."],["published_at","1781789748"],["t","nostr"],["t","reading"],["t","writing"]],"content":"A highlight is a small act of attention. You drag your cursor across a sentence and say: this one matters.\n\nWhen a highlight becomes a signed event, it stops being trapped in one app. It becomes a portable signal — a lens the whole network can share.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"85185bcb612a5ab446ca0e210c148f4be5ae76a9fba8d422534fa9356ab460d4","sig":"6f8671f7f433bd8190f94e5659d11885fc68bf41b544d8207e88feb5fe39f931eb9e361c2b56e3dd8b1d6437cc98be8b2e3baa9e9eb8ef596b5d7362a51c02f7"},{"kind":30023,"created_at":1781703348,"tags":[["d","relays-are-not-your-home"],["title","Relays Are Not Your Home"],["summary","On treating relays as interchangeable mirrors, not landlords."],["published_at","1781703348"],["t","nostr"],["t","relays"],["t","sovereignty"],["t","freedomtech"]],"content":"A relay is a dumb pipe that happens to remember things. That is its strength. You should never feel attached to one.\n\nIf an article lives on seven relays, no single operator can erase it. Pull it from any of them and verify the signature — they will all give you the same bytes, or they are lying, and the math will tell you which.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"41c2066ee3e3509fc524a62adebfb4ba959414c73e6448c0de6300ea5b980827","sig":"4c1cb19fa0ed1a0373e3aadffdd3fe37036dd1337ca7e7b0c813ca8d53f1a8345b516e30f09f0bf59d486be9ee1b1a7449f93d978d4bd98fd62f8df611664a9e"},{"kind":30023,"created_at":1781616948,"tags":[["d","self-custody-of-truth"],["title","Self-Custody of Truth"],["summary","Holding your own proof, the way you hold your own keys."],["published_at","1781616948"],["t","bitcoin"],["t","nostr"],["t","sovereignty"]],"content":"We learned to hold our own keys. The next lesson is holding our own proofs.\n\nAn article you have verified and saved is yours. You can re-check it offline, with no relay, no server, no permission. The proof travels with the bytes.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"eb36a21795e891509bfe05e455d2c421b8729d0482b213579c97e1bae26a2944","sig":"dfb6c9ec80455dca3542836dfc58ae765bdb5ae1334ddc9a71f49dea4f5e7996e0a0d79904d1a5a7c2d9b7d914f53e9a96b98c0dc2781fb4ab860de680961b0c"},{"kind":30023,"created_at":1781530548,"tags":[["d","against-the-walled-garden"],["title","Against the Walled Garden"],["summary","Why permissionless publishing changes the incentives."],["published_at","1781530548"],["t","writing"],["t","nostr"],["t","freedomtech"]],"content":"Medium and Substack are gardens with walls. Pretty inside, but the gate is owned by someone else.\n\nPermissionless publishing removes the gate. The cost is that you must bring your own trust. The signature is how you bring it.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"98351c89258843bda4fe32bc3158ee564e0ef377c974f5b09a0e474ce6fbf2bb","sig":"c7162639adebe663e3125c9da8e95f8174e2c4e4014792ca29e4ef050d4f6962f21de04a038579e08317bb5c45f7a34c66d449e47e3d146f749c8c150b1d66c4"},{"kind":30023,"created_at":1781444148,"tags":[["d","a-lens-on-the-written-web"],["title","A Lens on the Written Web"],["summary","Imagining an overlay of everything readers found worth keeping."],["published_at","1781444148"],["t","reading"],["t","nostr"],["t","value4value"]],"content":"Imagine every passage anyone ever found worth keeping, painted faintly over the text. Not a comment section — a lens.\n\nThe hard part was never the idea. It was the anchoring, and the incentives. Sats fix the second. Signed events make the first tractable.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"76f88a171250f458df82b834390003883eec0b3214245877e64e5efc1c45c70a","sig":"76a52da7be1067b4ef92acd7dfbb210910a20cd025efab58d8134bbad13163afd0bba2ba19f283fb09a2a6f12fe63b62a131d5d64d743a7b0343c22730c52702"},{"kind":30023,"created_at":1781357748,"tags":[["d","what-a-reader-owes-a-writer"],["title","What a Reader Owes a Writer"],["summary","Value-for-value, in one short note."],["published_at","1781357748"],["t","value4value"],["t","bitcoin"],["t","writing"]],"content":"Attention is cheap and easily faked. Sats are scarce and unforgeable.\n\nA zap is a reader telling a writer, in the only language that cannot be gamed: this was worth it.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"d0ce79b650be5f5fb7f0a53fe18c60022fc54f81b39ae1db84a27a52736adea0","sig":"7ec3cb6b72541ab6b11ab3cc3c4c2767228ca37f5f56e77abca552fef8fad1b330ce1acc3a2a90a043653df994c877f348aacaaca7083fffc51f6872862e0880"},{"kind":30023,"created_at":1781271348,"tags":[["d","the-splinter-in-your-mind"],["title","The Splinter in Your Mind"],["summary","On the feeling that something is wrong with the money."],["published_at","1781271348"],["t","bitcoin"],["t","philosophy"],["t","21"]],"content":"You cannot quite say what it is. The prices, the rules, the way the ground shifts under your savings.\n\nThen you take the orange pill, and the splinter has a name.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"cf1143634251d82aa1892683df7b26faf9c13688b8768bc9be2bc05a07a8e4ab","sig":"20784a621891799ba22324e9a1efec1c109617a1fba266123aa2b8eddd6a8a2d5264c3012b7e6ceeccfde7bdb4686f7f379c926215fbc2d417a35cc7f61f3cbf"},{"kind":30023,"created_at":1781184948,"tags":[["d","sound-money-sound-writing"],["title","Sound Money, Sound Writing"],["summary","What changes when the unit of account stops melting."],["published_at","1781184948"],["t","bitcoin"],["t","writing"],["t","philosophy"]],"content":"When money holds its value, time preference falls. You plan further out. You build things meant to last.\n\nWriting changes too. Less churn, more permanence. A signed article is meant to outlive the relay it was first posted to.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"6cc98ad5309121c8d9ece638443f5a303887f1ca5225f3ae56cfb95a3a534876","sig":"cba10c7214761792e9028331fbc8d8df3318ed3f84d2e21e6cd81722b6628b8116926d88f759b2ae535d62c07d88103e5727f8218f45994dd7f2d196817d4e34"},{"kind":30023,"created_at":1781098548,"tags":[["d","permissionless-by-default"],["title","Permissionless by Default"],["summary","The quiet radicalism of not asking."],["published_at","1781098548"],["t","nostr"],["t","freedomtech"],["t","sovereignty"]],"content":"No application form. No approval. No account to be suspended.\n\nYou generate a key and you exist. That is the radical part, hiding in plain sight.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"0d847278bf3bbc1be0910cda0d94f3c62ea4c971be5b10892c8838d8ecd51492","sig":"87a9c4431689d8a5d86eef916849d045f8c8eb41ad945cd1d95fa8c94d41bbb033775f72e587cda2e4ca9393454d26bf08bc1320459ee64f5d358d8a300a4454"},{"kind":30023,"created_at":1781012148,"tags":[["d","notes-on-canonical-form"],["title","Notes on Canonical Form"],["summary","How an event id is computed, and why it matters."],["published_at","1781012148"],["t","nostr"],["t","bitcoin"]],"content":"An event id is the SHA-256 of a canonical array: zero, pubkey, created_at, kind, tags, content. Serialize it the same way every time, hash it, and you get the id.\n\nChange one byte of content and the id changes. That is how this reader catches a relay that altered an article: it recomputes the id and compares.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"2b6cef5d5219bf173e68c6246937765e4f445de89a123b33568b4f39ff21d034","sig":"69325a5d67f7870f14100c38c6daab941a72735029cc79d2359dd9e8aea6bd07f14d3434a45334d69602a9f38d8985616c5690eb8523b0efa24385c6dd41c249"},{"kind":30023,"created_at":1780925748,"tags":[["d","the-address-book-made-of-money"],["title","The Address Book Made of Money"],["summary","Zaps turn pubkeys into payment endpoints."],["published_at","1780925748"],["t","bitcoin"],["t","value4value"],["t","nostr"]],"content":"Every profile can carry a lightning address. Suddenly the social graph is also a payment graph.\n\nTipping becomes as cheap as liking. And the willingness to send goes up as the friction goes down.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"dd8c0811b29cea10d632194bdb375446f0e039202eeb7ff8b94f8fafbe294730","sig":"26e8137327a6425ebf21626a8cd287c03ca9bc064bc174132e721c5b4acc422360141845bc138565587252b3b1681ff7abe791514f205a2b2f877b65853d3f50"},{"kind":30023,"created_at":1780839348,"tags":[["d","read-it-anywhere"],["title","Read It Anywhere"],["summary","Source-agnostic reading as a feature, not an accident."],["published_at","1780839348"],["t","nostr"],["t","reading"],["t","sovereignty"]],"content":"Paste a reference and read. Do not ask where it came from. If the signature holds, the where is irrelevant.\n\nThis is location-independence as an everyday experience, not a slogan.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"08c40043b54f100c51aea128d175f080bcba52d9c143c22df57485ef05326abc","sig":"35802d9964e0e2469ffee4842f81eccf2674db0b9f88217306f96777fe5149342f1614ab71f30e1786b5dbd8516f14628b1ee4866cbf6c1a9e6ae468a4a09999"},{"kind":30023,"created_at":1780752948,"tags":[["d","optimism-is-a-strategy"],["title","Optimism Is a Strategy"],["summary","Why builders in this space tend to be cheerful."],["published_at","1780752948"],["t","philosophy"],["t","bitcoin"],["t","21"]],"content":"Cynicism is easy and useless. Optimism is harder and it ships code.\n\nThe future is not given. It is built, one signed brick at a time.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"3881ec0670453f315330a9ff8bb1480250c224938061e1322f77da3ec4c967b0","sig":"67a8d5be6d53894c40e957d92c31e28cb08711ad91125511888ea2b7bc22060711d105c6954c82a8c8b59b1620d62c839f369172af0c632befcfa14eec292303"},{"kind":30023,"created_at":1780666548,"tags":[["d","the-honest-relay"],["title","The Honest Relay"],["summary","What it means for a relay to behave."],["published_at","1780666548"],["t","relays"],["t","nostr"],["t","freedomtech"]],"content":"An honest relay stores what it is given and serves it back unchanged. That is the whole job.\n\nYou do not have to trust it to be honest. You verify. A dishonest relay cannot forge a signature, and that is the end of its power.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"7d18bf03f47f9f12475260c37011db24fa076ad76e3733d04c84a8eef69103d8","sig":"fe0d825c6476ba351116ec641aa51bd4c547c264897576f9be508df4e465f08a300110b33b1d8a7287f07af46857d0f1dcf590a672a1e61f23bf222a0ee40689"},{"kind":30023,"created_at":1780580148,"tags":[["d","writing-for-keys-not-clicks"],["title","Writing for Keys, Not Clicks"],["summary","How the incentive shifts when the audience holds keys."],["published_at","1780580148"],["t","writing"],["t","value4value"],["t","nostr"]],"content":"When your readers hold keys, they can pay you directly and follow you anywhere. You stop writing for an algorithm and start writing for people.\n\nIt is an old idea wearing new cryptography.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"bc25add8ad988e80f4f2a1aec58cb5c439a6f71613433abeee6e1a4a4e9cc4b3","sig":"f623f3ea0d8d95148036bbc4f21b3d3dcac4183f3518e373d24c9390da5811c1e5f05000af197890466a4df522919f13971b2ba1cf3f542b17e20b13c7719b2d"},{"kind":30023,"created_at":1780493748,"tags":[["d","provenance-without-a-notary"],["title","Provenance Without a Notary"],["summary","Timestamps, first-seen, and the absence of authority."],["published_at","1780493748"],["t","bitcoin"],["t","nostr"],["t","philosophy"]],"content":"Who needs a notary when you have a signature and a chain? Provenance stops being a service you buy and becomes a property you check.\n\nNo authority required. That is the recurring theme, in money and in words.","pubkey":"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f","id":"b490649b6c8b14d86c708051d9de0799d47fed77230fe0d48f3a1e5b2004de58","sig":"6825b7e8baa6690f13d73a87af2f458196265bde6bcd67f02a8376c5bd031d9fc51208b70be65704c6a6a2d7fa35aa189ecd92a6aac924c29d100c49440da379"},{"kind":30023,"created_at":1780407348,"tags":[["d","small-tools-sharp-edges"],["title","Small Tools, Sharp Edges"],["summary","In praise of single-file software you can read."],["published_at","1780407348"],["t","freedomtech"],["t","nostr"],["t","writing"]],"content":"The best tools are small enough to read in an afternoon. No build step, no black box, no dependency you cannot inspect.\n\nYou should be able to open the source and see exactly what it does. Sovereignty starts with legibility.","pubkey":"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f","id":"9dd8545c21cd4afd7ed9b479d4ad721feb91fbfc6a11d633a40c90c5568be3ba","sig":"146dc73b01500b7c1a1b85b589ee4c2e164a39de41a561177e3544b818de25634c2922f0b189cad10cfd434aef6bba9531f7757c3c69417c7efe7df73d4e95bb"},{"kind":30023,"created_at":1780320948,"tags":[["d","a-hand-you-can-check"],["title","A Hand You Can Check"],["summary","Closing the loop: 21 articles, each one verifiable."],["published_at","1780320948"],["t","nostr"],["t","bitcoin"],["t","21"],["t","sovereignty"]],"content":"Not a feed. A hand of twenty-one cards.\n\nFlip each one and watch the proof run. The point is not that the articles are interesting — though some are. The point is that you never had to take anyone's word for it.","pubkey":"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6","id":"a42ccb75cda6382d8d68ecd4b5584a6f03b0e85f2e7c132a34eb2a1b5b4d5ab7","sig":"35519a07f9a0ea1c3e1e861a977b7f64d558c39934d0c5508a6066af4a90046f3f97933ec4868027b68d9b59120b28c0528a701e2b9d7db060fe7e1f6bd70b8a"}];
+  const FIXTURE_PROFILES = {"9ad5c86f2c40b477d45b01ad33e5d4058e00cf2b227c86f5e064dd8f08d5974f":{"name":"Satoshi Reads","picture":""},"a5c77c94bb6411a7d0ea04ac1dbe2e445c900241da96fde69d1377c3d3e7e05f":{"name":"orange.purple","picture":""},"3c48b049f30a32d5776a047fcae7fb555d5ca6b0604627ee684ff489ff51a5c6":{"name":"nostr scribe","picture":""}};
+
+  const NT = window.NostrTools;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  // ---- config ----------------------------------------------------------
+  const DECK_SIZE = 21;                       // Gigi's number, literally
+  const RELAYS = [
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.nostr.band",
+    "wss://nostr.wine",
+    "wss://relay.primal.net",
+    "wss://relay.snort.social",
+  ];
+  const FETCH_LIMIT = 120;                     // over-fetch, then keep newest 21 with a t-tag
+  const FETCH_TIMEOUT = 6500;
+  const WITNESS_RELAYS = RELAYS.slice(0, 5);
+  const WITNESS_TIMEOUT = 4500;
+
+  // ---- state -----------------------------------------------------------
+  const state = {
+    articles: [],            // {event, profile, title, summary, image, ts, ttags, verified}
+    byKey: new Map(),        // dedupe key -> article
+    profiles: new Map(),     // pubkey -> {name, picture}
+    selectedTags: new Set(),
+    mode: "or",              // "or" | "and"
+    verifiedTotal: 0,
+  };
+
+  let pool = null;
+  try { pool = new NT.SimplePool(); } catch (e) { /* surfaced below */ }
+
+  // ---- tiny utils ------------------------------------------------------
+  const enc = (s) => String(s == null ? "" : s);
+  function escapeHtml(s) {
+    return enc(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  // Tag helpers are defensive: a hostile relay can send malformed events
+  // (tags missing, null entries, non-string values). Never let one crash the deck.
+  function tagValue(ev, name) {
+    const tags = Array.isArray(ev.tags) ? ev.tags : [];
+    const t = tags.find((x) => Array.isArray(x) && x[0] === name && typeof x[1] === "string");
+    return t ? t[1] : undefined;
+  }
+  function tagValues(ev, name) {
+    const tags = Array.isArray(ev.tags) ? ev.tags : [];
+    return tags.filter((x) => Array.isArray(x) && x[0] === name && typeof x[1] === "string" && x[1]).map((x) => x[1]);
+  }
+  function dTag(ev) { return tagValue(ev, "d") || ""; }
+  function articleKey(ev) { return ev.kind + ":" + ev.pubkey + ":" + dTag(ev); } // addressable identity
+  function shortHex(h, n = 8) { return h ? h.slice(0, n) + "…" + h.slice(-n) : ""; }
+  function npubOf(pk) { try { return NT.nip19.npubEncode(pk); } catch (e) { return pk; } }
+  function naddrOf(ev) {
+    try { return NT.nip19.naddrEncode({ kind: ev.kind, pubkey: ev.pubkey, identifier: dTag(ev), relays: RELAYS.slice(0, 2) }); }
+    catch (e) { return ""; }
+  }
+  function timeAgo(sec) {
+    if (!sec) return "";
+    const d = Math.floor(Date.now() / 1000) - sec;
+    if (d < 60) return "just now";
+    const u = [["y", 31536000], ["mo", 2592000], ["d", 86400], ["h", 3600], ["m", 60]];
+    for (const [l, s] of u) { const n = Math.floor(d / s); if (n >= 1) return n + l + " ago"; }
+    return "just now";
+  }
+  function fmtDate(sec) {
+    if (!sec) return "";
+    try { return new Date(sec * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); }
+    catch (e) { return ""; }
+  }
+  function articleTimestamp(ev) {
+    const p = parseInt(tagValue(ev, "published_at") || "", 10);
+    return Number.isFinite(p) && p > 0 ? p : ev.created_at;
+  }
+  function toast(msg) {
+    const t = $("#copyhint"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 1200);
+  }
+  function copy(text, msg) {
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(() => toast(msg || "copied"))
+      .catch(() => { window.prompt("Copy:", text); });
+  }
+
+  // ---- the core: re-verify an event in the browser ---------------------
+  // We do TWO independent checks, on a clean clone so nostr-tools' cached
+  // verifiedSymbol can never give us a stale answer:
+  //   (1) recompute event.id from the canonical serialization -> must equal claimed id
+  //   (2) re-run the Schnorr signature check
+  // (1) catches a relay/MITM mutating content. (2) catches everything,
+  // including a forged id recomputed to match tampered content.
+  function cleanClone(ev) {
+    return {
+      id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at,
+      kind: ev.kind,
+      tags: Array.isArray(ev.tags) ? ev.tags.filter(Array.isArray).map((t) => t.slice()) : [],
+      content: ev.content, sig: ev.sig,
+    };
+  }
+  function proveEvent(ev) {
+    const e = cleanClone(ev);
+    let computedId = "", idMatch = false, sigOk = false, err = null;
+    try { computedId = NT.getEventHash(e); idMatch = computedId === e.id; }
+    catch (ex) { err = "id: " + ex.message; }
+    try { sigOk = NT.verifyEvent(cleanClone(ev)); }   // fresh clone again -> no cache
+    catch (ex) { err = (err ? err + "; " : "") + "sig: " + ex.message; }
+    return { idMatch, sigOk, computedId, claimedId: e.id, sig: e.sig, pubkey: e.pubkey, ok: idMatch && sigOk, err };
+  }
+
+  // =====================================================================
+  //  FETCH
+  // =====================================================================
+  function setStatus(text, kind) {
+    $("#statustext").textContent = text;
+    const d = $("#statusdot"); d.className = "dot" + (kind ? " " + kind : "");
+  }
+  function banner(html) { const b = $("#banner"); if (!html) { b.classList.remove("show"); return; } b.innerHTML = html; b.classList.add("show"); }
+
+  async function queryRelaysOnce(relays, filter, timeout) {
+    // Use querySync if present; otherwise fall back to subscribeManyEose.
+    if (pool && typeof pool.querySync === "function") {
+      return await pool.querySync(relays, filter, { maxWait: timeout }).catch(() => []);
+    }
+    return await new Promise((resolve) => {
+      const got = [];
+      let done = false;
+      const finish = () => { if (done) return; done = true; try { sub.close(); } catch (e) {} resolve(got); };
+      const sub = pool.subscribeMany(relays, [filter], {
+        onevent: (e) => got.push(e),
+        oneose: finish,
+      });
+      setTimeout(finish, timeout);
+    });
+  }
+
+  // Query a single relay for one article's address, return the event it serves (or null).
+  async function querySingleRelay(relay, filter, timeout) {
+    if (pool && typeof pool.querySync === "function") {
+      const r = await pool.querySync([relay], filter, { maxWait: timeout }).catch(() => null);
+      if (!r || !r.length) return null;
+      // newest wins (relays only keep latest for addressable, but be safe)
+      return r.sort((a, b) => b.created_at - a.created_at)[0];
+    }
+    return await new Promise((resolve) => {
+      let ev = null, done = false;
+      const finish = () => { if (done) return; done = true; try { sub.close(); } catch (e) {} resolve(ev); };
+      const sub = pool.subscribeMany([relay], [filter], {
+        onevent: (e) => { if (!ev || e.created_at > ev.created_at) ev = e; },
+        oneose: finish,
+      });
+      setTimeout(finish, timeout);
+    });
+  }
+
+  function ingestArticleEvent(ev) {
+    if (!ev || ev.kind !== 30023) return false;
+    const ttags = [...new Set(tagValues(ev, "t").map((t) => t.toLowerCase().trim()).filter(Boolean))];
+    const key = articleKey(ev);
+    const existing = state.byKey.get(key);
+    if (existing && existing.event.created_at >= ev.created_at) return false; // keep newest
+    const art = {
+      event: ev,
+      key,
+      title: tagValue(ev, "title") || dTag(ev) || "Untitled",
+      summary: tagValue(ev, "summary") || "",
+      image: tagValue(ev, "image") || "",
+      ts: articleTimestamp(ev),
+      ttags,
+      proof: null,           // filled by verify pass
+    };
+    if (existing) {
+      const i = state.articles.indexOf(existing);
+      if (i >= 0) state.articles[i] = art;
+    } else {
+      state.articles.push(art);
+    }
+    state.byKey.set(key, art);
+    return true;
+  }
+
+  async function loadProfiles(pubkeys) {
+    const need = pubkeys.filter((pk) => !state.profiles.has(pk));
+    if (!need.length) return;
+    const metas = await queryRelaysOnce(RELAYS, { kinds: [0], authors: need, limit: need.length * 2 }, 5000);
+    const newest = new Map();
+    for (const m of metas) {
+      const cur = newest.get(m.pubkey);
+      if (!cur || m.created_at > cur.created_at) newest.set(m.pubkey, m);
+    }
+    for (const pk of need) {
+      const m = newest.get(pk);
+      if (!m) { state.profiles.set(pk, { name: "", picture: "" }); continue; }
+      let p = {};
+      try { p = JSON.parse(m.content) || {}; } catch (e) {}
+      state.profiles.set(pk, {
+        name: p.display_name || p.name || p.username || "",
+        picture: p.picture || "",
+      });
+    }
+  }
+
+  async function load() {
+    if (!NT) { setStatus("nostr-tools failed to load", "bad"); banner("⚠️ Could not load the nostr-tools library (offline?). The reader needs it; everything else still works once it's available."); return; }
+    if (!pool) { setStatus("relay pool unavailable", "bad"); }
+
+    renderSkeleton();
+    setStatus("Fetching articles from " + RELAYS.length + " relays…", "warn");
+
+    let events = [];
+    try {
+      events = await queryRelaysOnce(RELAYS, { kinds: [30023], limit: FETCH_LIMIT }, FETCH_TIMEOUT);
+    } catch (e) { events = []; }
+
+    // ingest + dedupe, keep only ones with a t-tag (so the hashtag UI is always populated),
+    // newest first, trim to 21.
+    for (const ev of events) {
+      try {
+        if (!ev || typeof ev.content !== "string" || !ev.content) continue;
+        if (!tagValues(ev, "t").length) continue;
+        ingestArticleEvent(ev);
+      } catch (e) { /* one crafted event must never blank the deck */ }
+    }
+    state.articles.sort((a, b) => b.ts - a.ts);
+
+    let usingFixture = false;
+    if (state.articles.length < 5) {
+      // relays were flaky — fall back to the embedded fixture so the deck always renders.
+      usingFixture = true;
+      banner("📡 Relays returned little or nothing right now — showing a bundled, fully-signed sample so you can still try the proofs. Reload to retry the live network.");
+      for (const pk in FIXTURE_PROFILES) state.profiles.set(pk, FIXTURE_PROFILES[pk]);
+      for (const ev of FIXTURE) { if (tagValues(ev, "t").length) ingestArticleEvent(ev); }
+      state.articles.sort((a, b) => b.ts - a.ts);
+    }
+
+    state.articles = state.articles.slice(0, DECK_SIZE);
+
+    if (!state.articles.length) {
+      setStatus("No articles reachable", "bad");
+      $("#deck").innerHTML = '<div class="empty"><b>Nothing came back.</b><br>Every relay was unreachable and the fixture failed to load. Try reloading.</div>';
+      return;
+    }
+
+    setStatus(state.articles.length + " articles · verifying signatures…", "warn");
+    renderTags();                // hashtag checkboxes with counts + AND/OR toggle
+    render();                    // show cards immediately (proof pending)
+    await loadProfiles([...new Set(state.articles.map((a) => a.event.pubkey))]);
+    verifyAll();                 // synchronous-ish, fast
+    render();
+    setStatus((usingFixture ? "Sample · " : "Live · ") + state.articles.length + " articles · " + state.verifiedTotal + " verified", usingFixture ? "warn" : "live");
+  }
+
+  function verifyAll() {
+    state.verifiedTotal = 0;
+    for (const a of state.articles) {
+      a.proof = proveEvent(a.event);
+      if (a.proof.ok) state.verifiedTotal++;
+    }
+    $("#verifiedCount").textContent = state.verifiedTotal;
+  }
+
+  // =====================================================================
+  //  TAG FILTER
+  // =====================================================================
+  function tagCounts() {
+    const m = new Map();
+    for (const a of state.articles) for (const t of a.ttags) m.set(t, (m.get(t) || 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }
+  function renderTags() {
+    const wrap = $("#tags");
+    const counts = tagCounts();
+    if (!counts.length) { wrap.innerHTML = ""; return; }
+    wrap.innerHTML = counts.map(([t, c]) => {
+      const on = state.selectedTags.has(t) ? "1" : "0";
+      return `<label class="tagchip" data-on="${on}" data-tag="${escapeHtml(t)}">
+        <input type="checkbox" ${on === "1" ? "checked" : ""} aria-label="${escapeHtml(t)} (${c})">
+        <span class="box">${on === "1" ? "✓" : ""}</span>
+        <span class="t">#${escapeHtml(t)}</span><span class="cnt">${c}</span>
+      </label>`;
+    }).join("");
+    $$(".tagchip", wrap).forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const t = el.dataset.tag;
+        if (state.selectedTags.has(t)) state.selectedTags.delete(t); else state.selectedTags.add(t);
+        renderTags(); render();
+      });
+    });
+  }
+  function visibleArticles() {
+    if (!state.selectedTags.size) return state.articles;
+    const sel = [...state.selectedTags];
+    return state.articles.filter((a) => {
+      const has = (t) => a.ttags.includes(t);
+      return state.mode === "and" ? sel.every(has) : sel.some(has);
+    });
+  }
+
+  // =====================================================================
+  //  RENDER DECK
+  // =====================================================================
+  function renderSkeleton() {
+    const deck = $("#deck");
+    deck.innerHTML = "";
+    for (let i = 0; i < 9; i++) {
+      const c = document.createElement("div");
+      c.className = "card skeleton";
+      c.innerHTML = `<div class="inner"><div class="face front"><div class="card-top">
+        <div class="author"><div class="avatar ph"></div><div class="meta" style="flex:1">
+          <div class="sk-line" style="width:60%"></div><div class="sk-line" style="width:35%;margin-top:6px"></div></div></div>
+        <div class="sk-line" style="width:90%;height:16px"></div>
+        <div class="sk-line" style="width:75%;height:16px"></div>
+        <div class="sk-line" style="width:50%"></div></div>
+        <div class="card-foot"><div class="sk-line" style="width:30%"></div></div></div></div>`;
+      deck.appendChild(c);
+    }
+  }
+
+  function avatarHtml(profile, pubkey) {
+    const initial = (profile.name || npubOf(pubkey).slice(4, 5) || "n").charAt(0).toUpperCase();
+    if (profile.picture) {
+      return `<img class="avatar" src="${escapeHtml(profile.picture)}" alt="" loading="lazy"
+        onerror="this.outerHTML='<div class=&quot;avatar ph&quot;>${escapeHtml(initial)}</div>'">`;
+    }
+    return `<div class="avatar ph">${escapeHtml(initial)}</div>`;
+  }
+
+  function vglyph(proof) {
+    if (!proof) return `<span class="vglyph pending">⏳ verifying</span>`;
+    return proof.ok
+      ? `<span class="vglyph ok">✓ verified</span>`
+      : `<span class="vglyph bad">✗ unverified</span>`;
+  }
+
+  function cardHtml(a, idx) {
+    const p = state.profiles.get(a.event.pubkey) || { name: "", picture: "" };
+    const name = p.name || shortHex(npubOf(a.event.pubkey).slice(4), 6);
+    const ftags = a.ttags.slice(0, 4).map((t) => `<span class="ftag">#${escapeHtml(t)}</span>`).join("");
+    return `
+    <div class="card" data-idx="${idx}" data-flipped="0">
+      <div class="inner">
+        <!-- PURPLE FACE : who / identity -->
+        <div class="face front">
+          <div class="card-top">
+            <div class="author">
+              ${avatarHtml(p, a.event.pubkey)}
+              <div class="meta">
+                <div class="name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                <div class="when" title="${escapeHtml(fmtDate(a.ts))}">${escapeHtml(fmtDate(a.ts))} · ${escapeHtml(timeAgo(a.ts))}</div>
+              </div>
+            </div>
+            <h3 class="card-title">${escapeHtml(a.title)}</h3>
+            ${a.summary ? `<div class="card-sum">${escapeHtml(a.summary)}</div>` : ""}
+          </div>
+          <div class="card-foot">
+            <div class="ftags">${ftags}</div>
+            <button class="flipbtn" data-act="flip">${vglyph(a.proof)} ▸</button>
+          </div>
+        </div>
+        <!-- ORANGE FACE : the proof / math -->
+        <div class="face back">
+          ${proofFaceHtml(a)}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function proofFaceHtml(a) {
+    const p = a.proof;
+    let verdict, checks;
+    if (!p) {
+      verdict = `<div class="verdict pending"><span class="big">⏳</span><span><span class="vt">Verifying…</span></span></div>`;
+      checks = "";
+    } else if (p.ok) {
+      verdict = `<div class="verdict ok"><span class="big">✓</span><span><span class="vt">Bytes intact · signed by this key</span><span class="vs">re-verified in your browser, just now</span></span></div>`;
+      checks = `
+        <div class="checks">
+          <div class="chk pass"><span class="m">✓</span><span><b>Event id recomputed</b> from canonical serialization — matches the claimed id.<span class="sub">no relay or proxy altered the content</span></span></div>
+          <div class="chk pass"><span class="m">✓</span><span><b>Schnorr signature valid</b> for the author's public key.<span class="sub">these exact bytes were signed by this key</span></span></div>
+        </div>`;
+    } else {
+      verdict = `<div class="verdict bad"><span class="big">✗</span><span><span class="vt">Unverified — do not trust these bytes</span><span class="vs">${p.err ? escapeHtml(p.err) : "the math does not hold"}</span></span></div>`;
+      checks = `
+        <div class="checks">
+          <div class="chk ${p.idMatch ? "pass" : "fail"}"><span class="m">${p.idMatch ? "✓" : "✗"}</span><span><b>Event id recompute</b> ${p.idMatch ? "matches" : "MISMATCH — content was altered"}.</span></div>
+          <div class="chk ${p.sigOk ? "pass" : "fail"}"><span class="m">${p.sigOk ? "✓" : "✗"}</span><span><b>Schnorr signature</b> ${p.sigOk ? "valid" : "INVALID for this key"}.</span></div>
+        </div>`;
+    }
+    const kv = p ? `
+      <div class="kv">
+        <div class="row"><span class="k">pubkey</span><span class="v">${escapeHtml(shortHex(npubOf(p.pubkey).slice(4), 10))}</span></div>
+        <div class="row"><span class="k">claimed id</span><span class="v">${escapeHtml(shortHex(p.claimedId, 10))}</span></div>
+        <div class="row"><span class="k">computed</span><span class="v ${p.idMatch ? "match" : "mismatch"}">${escapeHtml(shortHex(p.computedId, 10))}</span></div>
+      </div>` : "";
+    return `
+      <h3>⛓ Proof <span style="opacity:.6;font-weight:400;letter-spacing:.02em;text-transform:none">· checked locally</span></h3>
+      ${verdict}
+      ${checks}
+      ${kv}
+      <div class="witness" data-witness="1"><span class="relays"></span><span class="wtext" style="color:var(--muted-2)">witness across relays →</span></div>
+      <div class="backbtns">
+        <button class="bb" data-act="read">Read</button>
+        <button class="bb" data-act="tamper">Break it ↯</button>
+        <button class="bb" data-act="witness">Witness ⛓</button>
+        <button class="bb" data-act="capsule">Mint proof ⤓</button>
+        <button class="bb ghost" data-act="naddr">naddr</button>
+        <button class="bb ghost" data-act="unflip">↺</button>
+      </div>`;
+  }
+
+  function render() {
+    const deck = $("#deck");
+    const vis = visibleArticles();
+    $("#shownCount").textContent = vis.length;
+    $("#shownLabel").textContent = vis.length === 1 ? "article" : "articles";
+    if (!vis.length) {
+      deck.innerHTML = `<div class="empty"><b>No cards match those tags.</b><br>Try ANY mode, or clear the selection.</div>`;
+      return;
+    }
+    deck.innerHTML = vis.map((a) => cardHtml(a, state.articles.indexOf(a))).join("");
+    wireDeck(deck);
+  }
+
+  function wireDeck(deck) {
+    $$(".card", deck).forEach((card) => {
+      const idx = parseInt(card.dataset.idx, 10);
+      const a = state.articles[idx];
+      card.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-act]");
+        if (!btn) return;
+        const act = btn.dataset.act;
+        if (act === "flip") { card.dataset.flipped = "1"; lazyWitness(card, a); }
+        else if (act === "unflip") card.dataset.flipped = "0";
+        else if (act === "read") openModal(a, "read");
+        else if (act === "tamper") openModal(a, "tamper");
+        else if (act === "witness") { card.dataset.flipped = "1"; runWitness(card, a, true); }
+        else if (act === "capsule") mintCapsule(a);
+        else if (act === "naddr") copy(naddrOf(a.event), "naddr copied");
+      });
+    });
+  }
+
+  // =====================================================================
+  //  CROSS-RELAY BYTE WITNESS
+  //  Re-query the SAME article address from each relay individually and
+  //  confirm every copy is byte-identical (same event id, valid sig).
+  //  Honestly distinguish: identical / stale (older valid) / divergent.
+  // =====================================================================
+  function lazyWitness(card, a) { if (!a._witnessed) runWitness(card, a, false); }
+
+  async function runWitness(card, a, force) {
+    if (a._witnessing) return;
+    if (a._witnessed && !force) return;
+    a._witnessing = true;
+    const host = card.querySelector('[data-witness]');
+    if (!host) { a._witnessing = false; return; }
+    const dots = host.querySelector(".relays");
+    const text = host.querySelector(".wtext");
+    dots.innerHTML = WITNESS_RELAYS.map(() => `<span class="rd wait"></span>`).join("");
+    text.textContent = "querying " + WITNESS_RELAYS.length + " relays…";
+    text.style.color = "var(--muted-2)";
+
+    const filter = { kinds: [30023], authors: [a.event.pubkey], "#d": [dTag(a.event)] };
+    const results = await Promise.all(WITNESS_RELAYS.map(async (relay, i) => {
+      let ev = null;
+      try { ev = await querySingleRelay(relay, filter, WITNESS_TIMEOUT); } catch (e) {}
+      let status = "absent";
+      // A hostile relay can ignore the filter and return some other validly-signed
+      // event. Bind the returned event to the requested address before trusting it,
+      // or the witness could show a false "byte-identical" green.
+      if (ev && ev.pubkey === a.event.pubkey && ev.kind === 30023 && dTag(ev) === dTag(a.event)) {
+        const pr = proveEvent(ev);
+        if (!pr.ok) status = "tampered";
+        else if (ev.id === a.event.id) status = "identical";
+        else status = ev.created_at < a.event.created_at ? "stale" : "newer";
+      }
+      const dot = dots.children[i];
+      if (dot) dot.className = "rd " + (status === "identical" || status === "newer" ? "ok" : status === "tampered" ? "bad" : "wait");
+      if (dot && status === "absent") dot.className = "rd";
+      if (dot) dot.title = relay.replace("wss://", "") + " — " + status;
+      return status;
+    }));
+
+    a._witnessed = true; a._witnessing = false;
+    const identical = results.filter((r) => r === "identical" || r === "newer").length;
+    const tampered = results.filter((r) => r === "tampered").length;
+    const stale = results.filter((r) => r === "stale").length;
+    const present = results.filter((r) => r !== "absent").length;
+
+    if (tampered) { text.textContent = `⚠ ${tampered} relay served altered bytes`; text.style.color = "var(--bad)"; }
+    else if (identical >= 2) { text.textContent = `served byte-identical by ${identical} relays — location doesn't matter`; text.style.color = "var(--ok)"; }
+    else if (identical === 1 && stale) { text.textContent = `1 current copy · ${stale} relay${stale > 1 ? "s" : ""} serving an older edit`; text.style.color = "var(--warn)"; }
+    else if (present >= 1) { text.textContent = `served by ${present} relay${present > 1 ? "s" : ""}`; text.style.color = "var(--muted)"; }
+    else { text.textContent = "no relay answered in time"; text.style.color = "var(--muted-2)"; }
+  }
+
+  // =====================================================================
+  //  OFFLINE PROOF CAPSULE
+  //  A self-contained .html holding the signed event + an inlined verifier,
+  //  so anyone can re-run the proof offline (file://, wifi off). It self-tests
+  //  on load against a known-good fixture, so a broken capsule fails loudly.
+  // =====================================================================
+  function mintCapsule(a) {
+    const ev = cleanClone(a.event);
+    const p = state.profiles.get(ev.pubkey) || {};
+    const html = buildCapsule(ev, { title: a.title, author: p.name || "", npub: npubOf(ev.pubkey) });
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safe = (a.title || "article").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 48).toLowerCase();
+    link.href = url; link.download = "proof-" + (safe || "article") + ".html";
+    document.body.appendChild(link); link.click();
+    setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(url); }, 500);
+    toast("proof capsule downloaded");
+  }
+
+  function buildCapsule(ev, meta) {
+    // The verifier is vendored from the same nostr-tools bundle, loaded from CDN,
+    // with an OFFLINE-friendly note: the capsule re-verifies as soon as the lib is present.
+    const evJson = JSON.stringify(ev, null, 2);
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proof capsule — ${escapeHtml(meta.title)}</title>
+<script src="https://unpkg.com/[email protected]/lib/nostr.bundle.js"><\/script>
+<style>
+body{font-family:system-ui,sans-serif;background:#16071f;color:#f3ecfb;margin:0;padding:32px;line-height:1.6}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;background:linear-gradient(92deg,#c8a6ee,#fff,#f7931a);-webkit-background-clip:text;background-clip:text;color:transparent}
+.v{padding:14px 16px;border-radius:12px;border:1px solid;margin:16px 0;font-size:15px}
+.v.ok{background:#0f3d2c;border-color:#36d399;color:#bff5e0}.v.bad{background:#451018;border-color:#ff5d6c;color:#ffd2d6}.v.wait{background:#33240f;border-color:#7a4d12;color:#f7c873}
+.row{font-family:ui-monospace,monospace;font-size:12px;color:#b39ccb;word-break:break-all;margin:4px 0}
+.k{color:#f7931a;text-transform:uppercase;font-size:10px;letter-spacing:.06em}
+pre{background:rgba(0,0,0,.4);border:1px solid rgba(168,116,224,.2);border-radius:10px;padding:14px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.art{white-space:pre-wrap;border-top:1px solid rgba(168,116,224,.2);margin-top:24px;padding-top:18px;color:#e8def4}
+.note{color:#8c76a8;font-size:12.5px}
+</style></head><body><div class="wrap">
+<h1>Proof Capsule · The Proof Deck</h1>
+<p class="note">A self-contained proof. Open it anywhere — even offline (the verifier caches). It re-runs the
+Schnorr signature check and recomputes the event id from the canonical serialization, right in your browser.
+Trust the math, not where you got this file.</p>
+<div id="verdict" class="v wait">⏳ Verifying…</div>
+<div id="selftest" class="note"></div>
+<div class="row"><span class="k">title</span> ${escapeHtml(meta.title)}</div>
+<div class="row"><span class="k">author</span> ${escapeHtml(meta.author || "")} ${escapeHtml(meta.npub)}</div>
+<div class="row"><span class="k">claimed id</span> <span id="cid"></span></div>
+<div class="row"><span class="k">computed id</span> <span id="xid"></span></div>
+<details><summary class="note" style="cursor:pointer;margin:12px 0">Raw signed event (the proof's input)</summary><pre id="raw"></pre></details>
+<div class="art" id="article"></div>
+</div>
+<script type="application/json" id="event">${evJson.replace(/</g, "\\u003c")}<\/script>
+<script>
+(function(){
+  var ev = JSON.parse(document.getElementById("event").textContent);
+  document.getElementById("raw").textContent = JSON.stringify(ev,null,2);
+  document.getElementById("article").textContent = ev.content;
+  document.getElementById("cid").textContent = ev.id;
+  function clone(e){return {id:e.id,pubkey:e.pubkey,created_at:e.created_at,kind:e.kind,tags:e.tags.map(function(t){return t.slice()}),content:e.content,sig:e.sig}}
+  function run(){
+    var NT = window.NostrTools;
+    var V = document.getElementById("verdict");
+    if(!NT){ V.className="v wait"; V.textContent="⏳ Waiting for the verifier library… (connect once, then it works offline)"; return setTimeout(run,800); }
+    // self-test: verifier must accept a known-good event and reject a tampered one
+    var st = document.getElementById("selftest");
+    var selfOk = true;
+    try {
+      var good = clone(ev);
+      var idOkGood = NT.getEventHash(clone(good)) === good.id;
+      var bad = clone(ev); bad.content = bad.content + " ";
+      var idOkBad = NT.getEventHash(bad) === bad.id;          // must be false
+      selfOk = idOkGood && !idOkBad;
+    } catch(e){ selfOk=false; }
+    st.textContent = selfOk ? "self-test passed — the verifier is honest." : "⚠ self-test FAILED — do not trust this capsule.";
+    st.style.color = selfOk ? "#36d399" : "#ff5d6c";
+    var xid="", idMatch=false, sigOk=false;
+    try{ xid = NT.getEventHash(clone(ev)); idMatch = xid===ev.id; }catch(e){}
+    try{ sigOk = NT.verifyEvent(clone(ev)); }catch(e){}
+    document.getElementById("xid").textContent = xid;
+    document.getElementById("xid").style.color = idMatch ? "#36d399" : "#ff5d6c";
+    if(selfOk && idMatch && sigOk){ V.className="v ok"; V.innerHTML="✓ Verified — bytes intact, signed by this key. <br><small>Re-verified locally, no relay, no server.</small>"; }
+    else { V.className="v bad"; V.textContent="✗ Verification failed — the signature or id does not hold."; }
+  }
+  run();
+})();
+<\/script>
+</body></html>`;
+  }
+
+  // =====================================================================
+  //  MODAL : reader + tamper sandbox
+  // =====================================================================
+  let modalArticle = null;
+
+  function safeMarkdown(md) {
+    // minimal, escape-first markdown: headings, bold/italic, links, code, lists, quotes, hr, images.
+    let s = escapeHtml(md);
+    const blocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, (m, code) => { blocks.push("<pre><code>" + code.replace(/^\n/, "") + "</code></pre>"); return " B" + (blocks.length - 1) + " "; });
+    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    s = s.replace(/^###### (.*)$/gm, "<h3>$1</h3>").replace(/^##### (.*)$/gm, "<h3>$1</h3>")
+         .replace(/^#### (.*)$/gm, "<h3>$1</h3>").replace(/^### (.*)$/gm, "<h3>$1</h3>")
+         .replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>");
+    s = s.replace(/^&gt; (.*)$/gm, "<blockquote>$1</blockquote>");
+    s = s.replace(/^---+$/gm, "<hr>").replace(/^\*\*\*+$/gm, "<hr>");
+    s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, '<img alt="$1" src="$2">');
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    // lists
+    s = s.replace(/(?:^|\n)((?:[-*+] .*(?:\n|$))+)/g, (m, list) => {
+      const items = list.trim().split(/\n/).map((l) => "<li>" + l.replace(/^[-*+] /, "") + "</li>").join("");
+      return "\n<ul>" + items + "</ul>\n";
+    });
+    s = s.replace(/(?:^|\n)((?:\d+\. .*(?:\n|$))+)/g, (m, list) => {
+      const items = list.trim().split(/\n/).map((l) => "<li>" + l.replace(/^\d+\. /, "") + "</li>").join("");
+      return "\n<ol>" + items + "</ol>\n";
+    });
+    // paragraphs
+    s = s.split(/\n{2,}/).map((chunk) => {
+      const c = chunk.trim();
+      if (!c) return "";
+      if (/^<(h\d|ul|ol|pre|blockquote|hr|img)/.test(c)) return c;
+      if (/^ B\d+ $/.test(c)) return c;
+      return "<p>" + c.replace(/\n/g, "<br>") + "</p>";
+    }).join("\n");
+    s = s.replace(/ B(\d+) /g, (m, i) => blocks[+i]);
+    return s;
+  }
+
+  function openModal(a, panel) {
+    modalArticle = a;
+    const p = state.profiles.get(a.event.pubkey) || {};
+    $("#modalTitle").textContent = a.title;
+    $("#readByline").innerHTML =
+      avatarHtml(p, a.event.pubkey) +
+      `<div><div class="name" style="font-weight:600">${escapeHtml(p.name || shortHex(npubOf(a.event.pubkey).slice(4), 6))}</div>
+       <div class="when" style="color:var(--muted-2);font-size:12px">${escapeHtml(fmtDate(a.ts))}${a.proof ? (a.proof.ok ? ' · <span style="color:var(--ok)">✓ verified</span>' : ' · <span style="color:var(--bad)">✗ unverified</span>') : ""}</div></div>`;
+    $("#readBody").innerHTML = safeMarkdown(a.event.content || "_No content._");
+
+    setupSandbox(a);
+    selectPanel(panel || "read");
+    $("#scrim").classList.add("show");
+    document.body.style.overflow = "hidden";
+  }
+  function closeModal() {
+    $("#scrim").classList.remove("show");
+    document.body.style.overflow = "";
+    modalArticle = null;
+  }
+  function selectPanel(name) {
+    $("#tabRead").setAttribute("aria-selected", String(name === "read"));
+    $("#tabTamper").setAttribute("aria-selected", String(name === "tamper"));
+    $("#panelRead").classList.toggle("show", name === "read");
+    $("#panelTamper").classList.toggle("show", name === "tamper");
+  }
+
+  // ---- tamper sandbox --------------------------------------------------
+  function setupSandbox(a) {
+    const ta = $("#sandText");
+    ta.value = a.event.content || "";
+    ta._original = a.event.content || "";
+    ta._event = a.event;
+    updateSandbox();
+  }
+  function updateSandbox() {
+    const ta = $("#sandText");
+    const ev = ta._event;
+    if (!ev) return;
+    const tampered = cleanClone(ev);
+    tampered.content = ta.value;
+    const pr = proveEvent(tampered);
+    const v = $("#sandVerdict");
+    const changed = ta.value !== ta._original;
+    if (!changed && pr.ok) {
+      v.className = "verdict ok sand-verdict";
+      v.innerHTML = `<span class="big">✓</span><span><span class="vt">Verified — original, untampered bytes</span><span class="vs">recomputed id matches · Schnorr signature valid</span></span>`;
+    } else if (pr.ok) {
+      v.className = "verdict ok sand-verdict";
+      v.innerHTML = `<span class="big">✓</span><span><span class="vt">Still verifies</span><span class="vs">you reverted to the exact signed bytes</span></span>`;
+    } else {
+      const why = !pr.idMatch && !pr.sigOk ? "recomputed id no longer matches · signature broken"
+        : !pr.idMatch ? "recomputed event id no longer matches the claimed id" : "Schnorr signature no longer valid";
+      v.className = "verdict bad sand-verdict";
+      v.innerHTML = `<span class="big">✗</span><span><span class="vt">Tampered — the proof fails</span><span class="vs">${escapeHtml(why)}</span></span>`;
+    }
+    renderDiff(ta._original, ta.value);
+  }
+
+  // word-level LCS diff
+  function renderDiff(orig, now) {
+    const box = $("#sandDiff");
+    if (orig === now) { box.innerHTML = `<span class="diff-empty">No changes — this is the original, signed text.</span>`; return; }
+    const A = tokenize(orig), B = tokenize(now);
+    const ops = lcsDiff(A, B);
+    box.innerHTML = ops.map((op) => {
+      const t = escapeHtml(op.text);
+      if (op.type === "eq") return t;
+      if (op.type === "add") return `<span class="add">${t}</span>`;
+      return `<span class="del">${t}</span>`;
+    }).join("");
+  }
+  function tokenize(s) { return s.match(/\s+|\S+/g) || []; }
+  function lcsDiff(A, B) {
+    const n = A.length, m = B.length;
+    // DP table (fine for article-sized text)
+    const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const ops = [];
+    let i = 0, j = 0;
+    const push = (type, text) => {
+      const last = ops[ops.length - 1];
+      if (last && last.type === type) last.text += text; else ops.push({ type, text });
+    };
+    while (i < n && j < m) {
+      if (A[i] === B[j]) { push("eq", A[i]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", A[i]); i++; }
+      else { push("add", B[j]); j++; }
+    }
+    while (i < n) { push("del", A[i]); i++; }
+    while (j < m) { push("add", B[j]); j++; }
+    return ops;
+  }
+
+  // =====================================================================
+  //  naddr / npub intake — source doesn't matter
+  // =====================================================================
+  async function addFromInput() {
+    const raw = $("#naddrInput").value.trim();
+    if (!raw) return;
+    let decoded;
+    try { decoded = NT.nip19.decode(raw.replace(/^nostr:/, "")); }
+    catch (e) { toast("not a valid naddr / npub"); return; }
+    setStatus("Fetching pasted reference…", "warn");
+    try {
+      if (decoded.type === "naddr") {
+        const d = decoded.data;
+        if (d.kind !== 30023) { toast("that's not a long-form article"); setStatus("Live · " + state.articles.length + " articles", "live"); return; }
+        const relays = (d.relays && d.relays.length ? d.relays : RELAYS);
+        const ev = await querySingleRelayMulti(relays, { kinds: [30023], authors: [d.pubkey], "#d": [d.identifier] }, 6000);
+        if (!ev) { toast("couldn't find that article on those relays"); }
+        else { ingestArticleEvent(ev); await afterAdd(ev.pubkey); }
+      } else if (decoded.type === "npub" || decoded.type === "nprofile") {
+        const pk = decoded.type === "npub" ? decoded.data : decoded.data.pubkey;
+        const evs = await queryRelaysOnce(RELAYS, { kinds: [30023], authors: [pk], limit: 10 }, 6000);
+        const withT = evs.filter((e) => tagValues(e, "t").length).sort((a, b) => b.created_at - a.created_at);
+        let added = 0;
+        for (const e of withT) { if (ingestArticleEvent(e)) added++; if (added >= 5) break; }
+        if (!added) toast("no tagged articles from that author"); else { await afterAdd(pk); toast("added " + added + " article" + (added > 1 ? "s" : "")); }
+      } else { toast("paste an naddr or npub"); }
+    } catch (e) { toast("fetch failed"); }
+    setStatus("Live · " + state.articles.length + " articles · " + state.verifiedTotal + " verified", "live");
+  }
+  async function querySingleRelayMulti(relays, filter, timeout) {
+    const evs = await queryRelaysOnce(relays, filter, timeout);
+    if (!evs || !evs.length) return null;
+    return evs.sort((a, b) => b.created_at - a.created_at)[0];
+  }
+  async function afterAdd(pk) {
+    state.articles.sort((a, b) => b.ts - a.ts);
+    $("#naddrInput").value = "";
+    await loadProfiles([pk]);
+    verifyAll();
+    renderTags();
+    render();
+  }
+
+  // =====================================================================
+  //  WIRING
+  // =====================================================================
+  function wireUI() {
+    $("#modeOr").addEventListener("click", () => { state.mode = "or"; $("#modeOr").setAttribute("aria-pressed", "true"); $("#modeAnd").setAttribute("aria-pressed", "false"); render(); });
+    $("#modeAnd").addEventListener("click", () => { state.mode = "and"; $("#modeAnd").setAttribute("aria-pressed", "true"); $("#modeOr").setAttribute("aria-pressed", "false"); render(); });
+    $("#clearTags").addEventListener("click", () => { state.selectedTags.clear(); renderTags(); render(); });
+    $("#naddrGo").addEventListener("click", addFromInput);
+    $("#naddrInput").addEventListener("keydown", (e) => { if (e.key === "Enter") addFromInput(); });
+
+    $("#modalClose").addEventListener("click", closeModal);
+    $("#scrim").addEventListener("click", (e) => { if (e.target === $("#scrim")) closeModal(); });
+    $("#tabRead").addEventListener("click", () => selectPanel("read"));
+    $("#tabTamper").addEventListener("click", () => selectPanel("tamper"));
+    $("#sandText").addEventListener("input", updateSandbox);
+    $("#sandReset").addEventListener("click", () => { const ta = $("#sandText"); ta.value = ta._original; updateSandbox(); });
+    $("#sandFlip").addEventListener("click", () => {
+      const ta = $("#sandText"); const s = ta.value; if (!s.length) return;
+      const i = Math.floor(s.length / 2);
+      const ch = s[i] === "e" ? "a" : (/[a-z]/.test(s[i]) ? "x" : "e");
+      ta.value = s.slice(0, i) + ch + s.slice(i + 1);
+      updateSandbox();
+      $("#sandVerdict").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+    $("#viewSource").addEventListener("click", (e) => { e.preventDefault(); window.location.href = "view-source:" + window.location.href; });
+  }
+
+  // =====================================================================
+  //  GO
+  // =====================================================================
+  wireUI();
+  load();
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+screenshot-*.png
+_cap*.html
+test-capsule.html

@@ -1,0 +1,10 @@
+{
+  "name": "proof-deck-devtools",
+  "private": true,
+  "description": "Build/test tooling for The Proof Deck (the app itself is just index.html, no deps).",
+  "devDependencies": {
+    "nostr-tools": "^2",
+    "jsdom": "^24",
+    "playwright-core": "^1"
+  }
+}
