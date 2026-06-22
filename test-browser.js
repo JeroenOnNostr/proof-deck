@@ -94,6 +94,9 @@ const FILE_URL = "file://" + path.resolve("index.html");
   ok((await card0.getAttribute("data-flipped")) === "1", "clicking the card face flips it");
   ok(await card0.locator(".back .verdict.ok").count() > 0, "proof face shows OK verdict");
   ok(await card0.locator(".kv .v.match").count() > 0, "inspector: computed id matches (green)");
+  // proof face must NOT have an inner scrollbar — it should grow to fit
+  const backScroll = await card0.locator(".back").evaluate((el) => ({ sh: el.scrollHeight, ch: el.clientHeight }));
+  ok(backScroll.sh <= backScroll.ch + 2, "proof face has no inner scrollbar (sh " + backScroll.sh + " <= ch " + backScroll.ch + ")");
   await card0.locator('[data-act="unflip"]').click();
   await page.waitForTimeout(100);
 

@@ -173,6 +173,12 @@
     background:rgba(0,0,0,.25);border-radius:999px;padding:1px 7px
   }
   .tagchip[data-on="1"] .cnt{color:var(--orange-bright)}
+  .tagmore{
+    appearance:none;border:1px dashed var(--purple-300);background:transparent;color:var(--purple-200);
+    font-size:12.5px;font-weight:600;padding:5px 12px;border-radius:999px;cursor:pointer
+  }
+  .tagmore:hover{background:rgba(91,42,134,.4);color:#fff}
+  .tagrest{display:contents}
 
   /* ---------- deck ---------- */
   .deckmeta{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 8px;flex-wrap:wrap}
@@ -182,21 +188,24 @@
   .deck{
     display:grid;gap:16px;
     grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    align-items:start;            /* a flipped (taller) proof card won't stretch its row-mates */
     padding-bottom:60px;
   }
 
-  .card{ perspective:1400px; min-height:230px }
-  .card .inner{
-    position:relative;width:100%;height:100%;min-height:230px;
-    transition:transform .55s cubic-bezier(.2,.7,.2,1);
-    transform-style:preserve-3d;
-  }
-  .card[data-flipped="1"] .inner{transform:rotateY(180deg)}
+  /* Card faces swap in normal flow (no 3D rotate) so the showing face drives the
+     card height — the proof side can be taller than the front, with NO inner
+     scrollbar. A quick fade+lift sells the "flip" without fixed heights. */
+  .card{ min-height:230px }
+  .card .inner{ position:relative; width:100%; }
   .face{
-    position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
     border-radius:var(--card-radius);border:1px solid var(--line);
     display:flex;flex-direction:column;overflow:hidden;
+    animation:faceIn .28s ease;
   }
+  @keyframes faceIn{from{opacity:0;transform:translateY(6px) scale(.99)}to{opacity:1;transform:none}}
+  .card .back{display:none}
+  .card[data-flipped="1"] .front{display:none}
+  .card[data-flipped="1"] .back{display:flex}
 
   /* front = purple identity face */
   .front{
@@ -257,14 +266,13 @@
   .vglyph{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
   .vglyph.ok{color:var(--ok)} .vglyph.bad{color:var(--bad)} .vglyph.pending{color:var(--muted-2)}
 
-  /* back = orange proof face */
+  /* back = orange proof face. Grows to fit — no inner scroll. */
   .back{
-    transform:rotateY(180deg);
     background:
       radial-gradient(120% 80% at 80% 0%, rgba(247,147,26,.14), transparent 60%),
       linear-gradient(170deg,rgba(35,18,10,.96),rgba(20,9,4,.98));
     border-color:var(--orange-dim);
-    padding:14px;gap:10px;overflow:auto;
+    padding:14px;gap:10px;
   }
   .back h3{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--orange);display:flex;align-items:center;gap:8px}
   .verdict{
@@ -560,6 +568,7 @@
     profiles: new Map(),     // pubkey -> {name, picture}
     selectedTags: new Set(),
     mode: "or",              // "or" | "and"
+    showAllTags: false,      // expand the count-1 long tail
     verifiedTotal: 0,
   };
 
@@ -801,25 +810,37 @@
     for (const a of state.articles) for (const t of a.ttags) m.set(t, (m.get(t) || 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }
+  function chipHtml([t, c]) {
+    const on = state.selectedTags.has(t) ? "1" : "0";
+    return `<label class="tagchip" data-on="${on}" data-tag="${escapeHtml(t)}">
+      <input type="checkbox" ${on === "1" ? "checked" : ""} aria-label="${escapeHtml(t)} (${c})">
+      <span class="box">${on === "1" ? "✓" : ""}</span>
+      <span class="t">#${escapeHtml(t)}</span><span class="cnt">${c}</span>
+    </label>`;
+  }
   function renderTags() {
     const wrap = $("#tags");
     const counts = tagCounts();
     $("#tagToggleCount").textContent = counts.length;
     if (!counts.length) { wrap.innerHTML = ""; renderActiveFilters(); return; }
-    wrap.innerHTML = counts.map(([t, c]) => {
-      const on = state.selectedTags.has(t) ? "1" : "0";
-      return `<label class="tagchip" data-on="${on}" data-tag="${escapeHtml(t)}">
-        <input type="checkbox" ${on === "1" ? "checked" : ""} aria-label="${escapeHtml(t)} (${c})">
-        <span class="box">${on === "1" ? "✓" : ""}</span>
-        <span class="t">#${escapeHtml(t)}</span><span class="cnt">${c}</span>
-      </label>`;
-    }).join("");
+    // Primary = tags that actually group articles (count >= 2) or are selected.
+    // The long tail of count-1 tags folds behind a "+N more" toggle so the bar
+    // isn't a wall of ~40 one-off hashtags.
+    const primary = counts.filter(([t, c]) => c >= 2 || state.selectedTags.has(t));
+    const rest = counts.filter(([t, c]) => c < 2 && !state.selectedTags.has(t));
+    const showRest = state.showAllTags && rest.length;
+    let html = primary.map(chipHtml).join("");
+    if (rest.length) {
+      html += `<button class="tagmore" id="tagMore" aria-expanded="${showRest ? "true" : "false"}">`
+        + (showRest ? `Show fewer ▴` : `+${rest.length} more ▾`) + `</button>`;
+    }
+    if (showRest) html += `<span class="tagrest">${rest.map(chipHtml).join("")}</span>`;
+    wrap.innerHTML = html;
     $$(".tagchip", wrap).forEach((el) => {
-      el.addEventListener("click", (e) => {
-        e.preventDefault();
-        toggleTag(el.dataset.tag);
-      });
+      el.addEventListener("click", (e) => { e.preventDefault(); toggleTag(el.dataset.tag); });
     });
+    const more = $("#tagMore", wrap);
+    if (more) more.addEventListener("click", () => { state.showAllTags = !state.showAllTags; renderTags(); });
     renderActiveFilters();
   }
   function toggleTag(t) {
